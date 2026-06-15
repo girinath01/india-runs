@@ -600,15 +600,63 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REASONING GENERATOR  (template-based, no API calls)
+# DYNAMIC REASONING TEMPLATES
 # ─────────────────────────────────────────────────────────────────────────────
+
+TPL_SEARCH = [
+    "Built scalable search infrastructure using {s1} and {s2}; strong fit for retrieval-focused role.",
+    "Hands-on search-platform experience with {s1} and {s2}; aligns well with ranking-heavy JD.",
+    "Demonstrated production search engineering expertise through {s1}; strong relevance for search-oriented systems.",
+    "Strong search-stack background with {s1} and {s2}; good product-system alignment."
+]
+
+TPL_RANKING = [
+    "Demonstrated retrieval and ranking expertise through {s1} and {s2}; highly aligned with ranking-focused requirements.",
+    "Strong ranking-system experience using {s1}; valuable fit for recommendation and retrieval optimization.",
+    "Built ranking-oriented retrieval systems using {s1} and {s2}; strong signal for JD relevance."
+]
+
+TPL_REC = [
+    "Strong recommendation-system background with hands-on {s1} and {s2}; fits personalization-heavy search use cases.",
+    "Experience building recommendation pipelines using {s1}; strong alignment with retrieval-oriented systems.",
+    "Built production recommendation workflows using {s1} and {s2}; good product relevance."
+]
+
+TPL_SEMANTIC = [
+    "Strong semantic-search expertise with {s1} and {s2}; relevant for embedding-driven retrieval systems.",
+    "Hands-on experience in semantic retrieval using {s1}; supports retrieval-heavy product requirements."
+]
+
+TPL_VECTOR = [
+    "Experience building vector-search pipelines using {s1} and {s2}; relevant for large-scale retrieval systems.",
+    "Strong vector database exposure through {s1}; useful for retrieval optimization."
+]
+
+TPL_PROD = [
+    "Built production-grade retrieval systems using {s1} and {s2}; strong evidence of shipping capability.",
+    "Demonstrated hands-on deployment experience with {s1}; strong product-oriented signal."
+]
+
+TPL_BALANCED = [
+    "Balanced experience across retrieval, ranking, and recommendation systems; closely matches JD priorities.",
+    "Strong mix of search infrastructure and ranking signals using {s1} and {s2}."
+]
+
+TPL_RAG = [
+    "Relevant retrieval exposure through {s1}, though stronger emphasis on ranking systems would improve fit.",
+    "Useful semantic retrieval background with {s1}; slightly weaker than core ranking-focused profiles."
+]
+
+TPL_DEFAULT = [
+    "Solid technical foundation in {s1} and {s2}; relevant for ranking and retrieval workflows.",
+    "Demonstrates knowledge of {s1} suitable for search relevance tasks."
+]
 
 def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
                         consult_frac: float, prod_ratio: float, notice: int,
                         final_score: float) -> str:
     """
-    Generates a specific 1-2 sentence reasoning for Stage 4 manual review.
-    Must reference actual profile data — no generic filler.
+    Generates a specific 1-2 sentence reasoning for Stage 4 manual review using profile-aware templates.
     """
     tier1_hits = [
         s.get("name", "") for s in skills
@@ -618,38 +666,68 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
     ]
     
     career_desc = " ".join(j.get("description", "") or "" for j in career).lower()
-    has_ship = any(kw in career_desc for kw in ("production", "shipped", "deployed", "live system", "real users", "scaled system"))
+    full_text = profile.get("headline", "").lower() + " " + profile.get("summary", "").lower() + " " + career_desc
     
-    skills_str = " and ".join(tier1_hits[:2]) if tier1_hits else "relevant skills"
+    s1 = tier1_hits[0] if len(tier1_hits) > 0 else "relevant skills"
+    s2 = tier1_hits[1] if len(tier1_hits) > 1 else "core retrieval tools"
     
-    # Deterministic variant based on profile length to ensure variety
-    variant = (len(career) * 7 + len(skills)) % 4
+    # Profile signals
+    has_ltr = any(kw in full_text for kw in ("learning to rank", "ltr", "lambdamart", "bm25", "ranking system"))
+    has_search = any(kw in full_text for kw in ("opensearch", "elasticsearch", "search system", "search infra"))
+    has_rec = any(kw in full_text for kw in ("recommendation system", "personalization", "recommender"))
+    has_sem = any(kw in full_text for kw in ("semantic search", "nlp", "sentence transformer", "embedding"))
+    has_vec = any(kw in full_text for kw in ("faiss", "qdrant", "milvus", "weaviate", "pinecone", "pgvector"))
+    has_rag = any(kw in full_text for kw in ("rag", "langchain", "llm"))
+    has_prod = any(kw in full_text for kw in ("production", "shipped", "deployed", "live system", "scaled"))
+    has_balanced = has_search and has_rec and has_ltr
     
+    # Select template pool
+    if has_balanced:
+        pool = TPL_BALANCED
+    elif has_ltr:
+        pool = TPL_RANKING
+    elif has_rec:
+        pool = TPL_REC
+    elif has_search:
+        pool = TPL_SEARCH
+    elif has_vec:
+        pool = TPL_VECTOR
+    elif has_sem:
+        pool = TPL_SEMANTIC
+    elif has_prod:
+        pool = TPL_PROD
+    elif has_rag:
+        pool = TPL_RAG
+    else:
+        pool = TPL_DEFAULT
+        
+    cid = profile.get("id", "CAND")
+    variant = (len(career) * 7 + len(skills)) % len(pool)
+    base_reason = pool[variant].format(s1=s1, s2=s2)
+    
+    # Append availability modifier
     if final_score > 0.70:
-        if variant == 0:
-            s = f"Built production retrieval pipelines using {skills_str}; strong fit for ranking/search-focused role."
-        elif variant == 1:
-            s = f"Strong recommendation-system and semantic-search background with hands-on {skills_str}; aligns closely with retrieval-heavy JD."
-        elif variant == 2:
-            s = f"Experience in search infrastructure using {skills_str}; strong product-oriented fit."
+        if notice <= 30:
+            avail_pool = [
+                " Excellent availability ({notice}-day notice) further strengthens fit.",
+                " Strong profile supported by quick joining availability.",
+                " Good alignment with favorable joining timeline."
+            ]
+            avail_str = avail_pool[len(career) % len(avail_pool)].format(notice=notice)
+            return base_reason + avail_str
+        elif notice >= 60:
+            avail_pool = [
+                " Strong technical relevance, though slightly weaker due to {notice}-day notice period.",
+                " Relevant retrieval profile with moderate availability constraints."
+            ]
+            avail_str = avail_pool[len(skills) % len(avail_pool)].format(notice=notice)
+            return base_reason + avail_str
         else:
-            s = f"Demonstrated retrieval and ranking expertise through {skills_str}."
-            
-        if notice >= 60:
-            if variant in (2, 3):
-                s += f" Slightly weaker due to {notice}-day notice period."
-            else:
-                s += f" Slightly weaker fit due to {notice}-day notice period."
-        else:
-            if variant == 2:
-                s = f"Experience in search infrastructure using {skills_str}; strong product-oriented fit with good availability."
-            elif variant == 3:
-                s += f" Excellent availability ({notice}-day notice)."
-        return s
+            return base_reason
     else:
         if not tier1_hits:
             return f"Missing core retrieval/search skills for the founding role. Notice period: {notice} days."
-        return f"Partial match with {skills_str}, but lacks strong production or seniority signals."
+        return f"Partial match with {s1} and {s2}, but lacks strong production or seniority signals."
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -741,7 +819,22 @@ def deep_score(candidate: dict) -> tuple[float, str]:
     if last_dt:
         days = (TODAY - last_dt).days
         recent_activity = max(0.0, 1.0 - (days / 180.0))
-    tie_break = (0.01 * rr) + (0.005 * recent_activity) + (0.005 * otw)
+        
+    # Micro category tie-breaker (only affects ~0.01 level)
+    # LTR > Rec > Search > Sem > RAG
+    cat_tie = 0.0
+    if "learning to rank" in full_text or "bm25" in full_text or "ranking system" in full_text:
+        cat_tie += 0.005
+    elif "recommendation" in full_text or "recommender" in full_text:
+        cat_tie += 0.004
+    elif "search infra" in full_text or "search system" in full_text or "opensearch" in full_text:
+        cat_tie += 0.003
+    elif "semantic search" in full_text:
+        cat_tie += 0.002
+    elif "rag" in full_text:
+        cat_tie += 0.001
+
+    tie_break = (0.01 * rr) + (0.005 * recent_activity) + (0.005 * otw) + cat_tie
 
     base_raw = (
         0.30 * skill_fit
