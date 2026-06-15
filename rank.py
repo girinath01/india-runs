@@ -667,7 +667,7 @@ TPL_VECTOR = [
     "Experience operating large-scale vector stores using {s1} and {s2}; {tone_adj} relevance to the role.",
     "Exposure to vector retrieval systems with {s1} and {s2}; demonstrates {tone_adj} alignment with scalability expertise.",
     "Hands-on vector retrieval exposure using {s1} and {s2}; {tone_adj} fit for embedding-driven retrieval systems.",
-    "Hands-on vector database management via {s1} and {s2}; {tone_adj} alignment with the search infrastructure needs.",
+    "Hands-on vector database management via {s1} and {s2}; {tone_adj} alignment with the vector retrieval needs.",
     "Experience with vector similarity search solutions using {s1} and {s2}; {tone_adj} positioning for this engineering team.",
     "Exposure to vector search optimization and indexing with {s1} and {s2}; {tone_adj} fit for recommendation workflows."
 ]
@@ -711,19 +711,6 @@ TPL_RAG = [
     "Background in LLM-assisted search using {s1} and {s2}; {tone_adj} fit but lacks heavy learning-to-rank focus."
 ]
 
-TPL_DEFAULT = [
-    "Technical foundation in {s1} and {s2}; {tone_adj} fit for ranking and retrieval workflows.",
-    "Knowledge of {s1} and {s2} suitable for search relevance tasks; {tone_adj} alignment.",
-    "Experience utilizing {s1} and {s2}; {tone_adj} relevance to the overall job requirements.",
-    "Background featuring {s1} and {s2}; indicates {tone_adj} potential for the retrieval role.",
-    "Exposure to {s1} and {s2}; demonstrates {tone_adj} alignment with the engineering stack.",
-    "Familiarity with {s1} and {s2}; {tone_adj} fit for the team's technical direction.",
-    "Practical application of {s1} and {s2}; {tone_adj} candidate for further evaluation.",
-    "Competence in {s1} and {s2}; shows {tone_adj} alignment with core search principles.",
-    "Technical exposure encompassing {s1} and {s2}; {tone_adj} fit for retrieval tasks.",
-    "Understanding of modern engineering utilizing {s1} and {s2}; {tone_adj} match for the role."
-]
-
 AVAIL_SHORT = [
     " Excellent availability ({notice}-day notice) further strengthens the fit.",
     " Profile supported by quick joining availability.",
@@ -750,33 +737,118 @@ AVAIL_LONG = [
     " While technically sound, the {notice}-day notice period poses a slight logistical challenge."
 ]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SKILL TAXONOMY  — authoritative mapping used by generate_reasoning
+# Each set contains lowercase fragments matched against the candidate skill name.
+# BM25/Lucene/Elasticsearch are SEARCH tools, not vector DBs.
+# Pinecone/Weaviate/FAISS are VECTOR tools, not search engines.
+# ─────────────────────────────────────────────────────────────────────────────
+SKILL_RANKING = {
+    "learning to rank", "ltr", "lambdamart", "xgboost ranking",
+    "recommendation systems", "recommender", "recommendation engine",
+    "recommendation system", "collaborative filtering", "matrix factorization",
+    "bpr", "svd", "als",
+}
+
+SKILL_SEARCH = {
+    "opensearch", "elasticsearch", "solr", "bm25", "lucene",
+    "search ranking", "information retrieval", "tfidf", "tf-idf",
+    "inverted index", "full-text search", "keyword search",
+}
+
+SKILL_VECTOR = {
+    "faiss", "pinecone", "qdrant", "weaviate", "milvus",
+    "pgvector", "chroma", "vespa", "annoy", "scann",
+    "hnsw", "approximate nearest neighbor", "ann search",
+    "vector database", "vector db", "vector store",
+    "vector search", "dense retrieval",
+}
+
+SKILL_SEMANTIC = {
+    "semantic search", "sentence transformers", "bi-encoder", "cross-encoder",
+    "embeddings", "text embeddings", "bert", "nlp", "natural language processing",
+    "neural retrieval", "dense passage retrieval", "dpr",
+}
+
+SKILL_RAG = {
+    "rag", "retrieval-augmented generation", "langchain", "llamaindex",
+    "llm", "gpt", "openai", "llama", "generative ai", "prompt engineering",
+}
+
+
+def _categorise_skill(skill_name: str) -> str | None:
+    """Return the taxonomy category for a skill, or None if uncategorised.
+    Priority: RANKING > SEARCH > VECTOR > SEMANTIC > RAG
+    This ensures BM25 always maps to SEARCH, not mistakenly to VECTOR.
+    """
+    s = skill_name.lower()
+    if any(kw in s or s in kw for kw in SKILL_RANKING):
+        return "RANKING"
+    if any(kw in s or s in kw for kw in SKILL_SEARCH):
+        return "SEARCH"
+    if any(kw in s or s in kw for kw in SKILL_VECTOR):
+        return "VECTOR"
+    if any(kw in s or s in kw for kw in SKILL_SEMANTIC):
+        return "SEMANTIC"
+    if any(kw in s or s in kw for kw in SKILL_RAG):
+        return "RAG"
+    return None
+
+
+
+
 def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
                         consult_frac: float, prod_ratio: float, notice: int,
                         final_score: float) -> tuple[str, str, str]:
     """
-    Generates a specific 1-2 sentence reasoning for Stage 4 manual review using profile-aware templates.
+    Generates a 1-2 sentence reasoning for Stage 4 manual review.
+    Skills are categorised first; s1/s2 are chosen ONLY from the category
+    that matches the selected template pool — preventing cross-category mismatches.
     Returns (confidence_str, reason_str, category_for_mmr)
     """
-    tier1_hits = [
-        s.get("name", "") for s in skills
-        if len(s.get("name", "").lower()) >= 3
-        and any(kw in s.get("name", "").lower() or s.get("name", "").lower() in kw
-                for kw in TIER1_SKILLS)
-    ]
-    
-    s1 = tier1_hits[0] if len(tier1_hits) > 0 else "relevant skills"
-    s2 = tier1_hits[1] if len(tier1_hits) > 1 else "core retrieval tools"
-    
-    # Strictly scan verified skills list
-    skill_names = [s.get("name", "").lower() for s in skills]
-    has_ltr = any("learning to rank" in s or "ltr" in s or "lambdamart" in s for s in skill_names)
-    has_rec = any("recommendation" in s for s in skill_names)
-    has_search = any("opensearch" in s or "elasticsearch" in s or "solr" in s for s in skill_names)
-    has_sem = any("semantic search" in s or "nlp" in s for s in skill_names)
-    has_vec = any("faiss" in s or "qdrant" in s or "milvus" in s or "weaviate" in s or "pinecone" in s for s in skill_names)
-    has_rag = any("rag" in s or "langchain" in s for s in skill_names)
-    
-    # Determine confidence score string
+    # ── Step 1: Categorise every skill ───────────────────────────────────────
+    skill_by_cat: dict[str, list[str]] = {"RANKING": [], "SEARCH": [], "VECTOR": [], "SEMANTIC": [], "RAG": []}
+    for s_obj in skills:
+        name = s_obj.get("name", "") or ""
+        if len(name) < 2:
+            continue
+        cat = _categorise_skill(name)
+        if cat:
+            skill_by_cat[cat].append(name)
+
+    # ── Step 2: Select pool by highest JD-relevance category present ─────────
+    POOL_MAP = {
+        "RANKING":  (TPL_RANKING,  "RANKING"),
+        "SEARCH":   (TPL_SEARCH,   "SEARCH"),
+        "VECTOR":   (TPL_VECTOR,   "VECTOR"),
+        "SEMANTIC": (TPL_SEMANTIC, "SEMANTIC"),
+        "RAG":      (TPL_RAG,      "RAG"),
+    }
+    chosen_cat = None
+    for cat in ["RANKING", "SEARCH", "VECTOR", "SEMANTIC", "RAG"]:
+        if skill_by_cat[cat]:
+            chosen_cat = cat
+            break
+
+    if chosen_cat:
+        pool, category_for_mmr = POOL_MAP[chosen_cat]
+        # s1, s2 come ONLY from skills in that category — no cross-category leak
+        cat_skills = skill_by_cat[chosen_cat]
+        s1 = cat_skills[0] if len(cat_skills) > 0 else "relevant skills"
+        s2 = cat_skills[1] if len(cat_skills) > 1 else "core retrieval tools"
+    else:
+        pool, category_for_mmr = TPL_BALANCED, "BALANCED"
+        # Fallback: use any tier1 skill as labels
+        tier1_hits = [
+            s.get("name", "") for s in skills
+            if len(s.get("name", "").lower()) >= 3
+            and any(kw in s.get("name", "").lower() or s.get("name", "").lower() in kw
+                    for kw in TIER1_SKILLS)
+        ]
+        s1 = tier1_hits[0] if tier1_hits else "relevant skills"
+        s2 = tier1_hits[1] if len(tier1_hits) > 1 else "core retrieval tools"
+
+    # ── Step 3: Confidence and tone ───────────────────────────────────────────
     conf_pct = min(99, int((final_score / 1.1) * 100))
     if final_score > 0.90:
         tone_adj = "strong"
@@ -787,44 +859,12 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
     else:
         tone_adj = "partial"
         conf_str = f"Low ({conf_pct}%)"
-    
-    # Select template pool strictly based on skills list
-    category_for_mmr = "DEFAULT"
-    if has_ltr:
-        pool = TPL_RANKING
-        category_for_mmr = "RANKING"
-    elif has_rec:
-        pool = TPL_REC
-        category_for_mmr = "REC"
-    elif has_search:
-        pool = TPL_SEARCH
-        category_for_mmr = "SEARCH"
-    elif has_sem:
-        pool = TPL_SEMANTIC
-        category_for_mmr = "SEMANTIC"
-    elif has_vec:
-        pool = TPL_VECTOR
-        category_for_mmr = "VECTOR"
-    elif has_rag:
-        pool = TPL_RAG
-        category_for_mmr = "RAG"
-    else:
-        pool = TPL_BALANCED
-        category_for_mmr = "BALANCED"
-        
-    cid = profile.get("id", "CAND")
+
+    # ── Step 4: Render template ───────────────────────────────────────────────
     variant = (len(career) * 7 + len(skills)) % len(pool)
-    
-    if final_score > 0.90:
-        tone_adj = "strong"
-    elif final_score > 0.80:
-        tone_adj = "moderate"
-    else:
-        tone_adj = "partial"
-        
     base_reason = pool[variant].format(s1=s1, s2=s2, tone_adj=tone_adj)
-    
-    # Append availability modifier
+
+    # ── Step 5: Append availability note ─────────────────────────────────────
     if final_score > 0.70:
         if notice <= 30:
             avail_str = AVAIL_SHORT[len(career) % len(AVAIL_SHORT)].format(notice=notice)
@@ -835,9 +875,11 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
         else:
             return conf_str, f"Match Confidence: {conf_str} — " + base_reason, category_for_mmr
     else:
-        if not tier1_hits:
+        if not s1 or s1 == "relevant skills":
             return conf_str, f"Match Confidence: {conf_str} — Missing core retrieval/search skills for the founding role. Notice period: {notice} days.", category_for_mmr
         return conf_str, f"Match Confidence: {conf_str} — Partial match with {s1} and {s2}, but lacks strong production or seniority signals.", category_for_mmr
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
