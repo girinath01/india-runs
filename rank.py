@@ -1097,9 +1097,13 @@ def rank_candidates(input_path: str, output_path: str, top_k: int = 3000) -> Non
                     best_mmr_score = mmr_score
                     best_idx = i
                     
-            diverse_top_20.append(remaining.pop(best_idx))
+            best_cand = remaining.pop(best_idx)
+            # Explicitly update the candidate's score to the penalized mmr_score
+            diverse_top_20.append((best_cand[0], best_mmr_score, best_cand[2], best_cand[3], best_cand[4]))
             
-    top_100 = diverse_top_20 + top_100[20:]
+    # Recombine and strictly sort by final score to enforce descending order
+    top_100 = diverse_top_20 + deep_results[20:100]
+    top_100.sort(key=lambda x: (-x[1], x[0]))
 
     # Honeypot audit
     hp_count = sum(1 for _, sc, _, _, _ in top_100 if sc == 0.0)
