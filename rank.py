@@ -304,5 +304,183 @@ def score_title_fit(profile: dict, career_history: list) -> tuple:
     return final_score, is_non_tech, consulting_fraction
 
 
+def score_experience_years(profile: dict) -> float:
+    """
+    Score years of experience. JD sweet spot: 5-9 years.
+    The JD says '5-9 is a range, not a requirement' but the ideal
+    imagined candidate is 6-8 years at product companies.
+    """
+    years = profile.get("years_of_experience", 0)
+
+    if years < 2:
+        return 0.05
+    elif years < 3:
+        return 0.25
+    elif years < 4:
+        return 0.45
+    elif years < 5:
+        return 0.68
+    elif years <= 9:
+        # Peak zone: scale up to 7yr then gently down
+        if years <= 7:
+            return 0.88 + (years - 5) * 0.035   # 0.88 → 0.95
+        else:
+            return 0.95 - (years - 7) * 0.025   # 0.95 → 0.90
+    elif years <= 12:
+        return 0.80 - (years - 9) * 0.04         # 0.80 → 0.68
+    else:
+        return max(0.45, 0.68 - (years - 12) * 0.04)
+
+
+def score_production_vs_research(career_history: list) -> float:
+    """
+    Assess production deployment experience vs. pure research.
+    JD is explicit: 'pure research without production → we will not move forward.'
+
+    Scan career descriptions for production signals (weighted by job duration)
+    vs. research-only signals.
+    """
+    PROD_SIGNALS = [
+        "production", "deployed", "shipped", "launched", "live system",
+        "real users", "at scale", "billion", "million requests", "million users",
+        "latency", "throughput", "serving", "inference server", "inference api",
+        "a/b test", "experiment", "rollout", "canary",
+        "api", "microservice", "pipeline", "platform", "system design",
+        "ranking", "retrieval", "recommendation", "search engine",
+        "embedding service", "vector", "index",
+        "users", "customers", "traffic", "qps", "rps",
+        "fine-tun", "rag", "llm", "model serving",
+        "product company", "startup", "product",
+    ]
+    RESEARCH_ONLY_SIGNALS = [
+        "paper", "publication", "conference paper", "journal", "arxiv",
+        "phd candidate", "academic", "thesis", "dissertation",
+        "pure research", "benchmark only", "research lab", "research-only",
+        "no production", "theoretical",
+    ]
+
+    prod_score = 0.0
+    res_score = 0.0
+
+    for job in career_history:
+        desc = job.get("description", "").lower()
+        duration = max(1, job.get("duration_months", 1))
+
+        prod_hits = sum(1 for kw in PROD_SIGNALS if kw in desc)
+        res_hits = sum(1 for kw in RESEARCH_ONLY_SIGNALS if kw in desc)
+
+        prod_score += prod_hits * duration
+        res_score += res_hits * duration
+
+    total = prod_score + res_score
+    if total == 0:
+        return 0.45  # no description signal — neutral but slightly below midpoint
+
+    return clamp(prod_score / total)
+
+
+def score_behavioral(signals: dict) -> float:
+    """
+    Score behavioral engagement signals from the Redrob platform.
+    10 sub-signals covering availability, engagement, and reliability.
+
+    Key insight from the JD: 'a perfect-on-paper candidate who hasn't
+    logged in for 6 months and has a 5% response rate is, for hiring
+    purposes, not actually available.'
+    """
+    sub_scores = []
+
+    # 1. Open to work (binary — most important availability signal)
+    sub_scores.append(1.0 if signals.get("open_to_work_flag", False) else 0.20)
+
+    # 2. Last active date (recency)
+    last_active_str = signals.get("last_active_date", "")
+    if last_active_str:
+        try:
+            last_active = datetime.strptime(last_active_str, "%Y-%m-%d").date()
+            days_ago = (TODAY - last_active).days
+            if days_ago <= 7:
+                sub_scores.append(1.00)
+            elif days_ago <= 30:
+                sub_scores.append(0.90)
+            elif days_ago <= 90:
+                sub_scores.append(0.70)
+            elif days_ago <= 180:
+                sub_scores.append(0.40)
+            elif days_ago <= 365:
+                sub_scores.append(0.20)
+            else:
+                sub_scores.append(0.05)
+        except ValueError:
+            sub_scores.append(0.50)
+    else:
+        sub_scores.append(0.50)
+
+    # 3. Recruiter response rate (engagement reliability)
+    rr = signals.get("recruiter_response_rate", 0.5)
+    sub_scores.append(clamp(float(rr)))
+
+    # 4. Interview completion rate (no-ghosters)
+    icr = signals.get("interview_completion_rate", 0.5)
+    sub_scores.append(clamp(float(icr)))
+
+    # 5. GitHub activity (important for Senior AI Engineer role)
+    gh = signals.get("github_activity_score", -1)
+    if gh == -1:
+        sub_scores.append(0.20)   # No GitHub linked — mild negative for AI Engineer role
+    else:
+        sub_scores.append(normalize(float(gh), 0, 100))
+
+    # 6. Notice period (JD explicitly wants sub-30 days, can buy out up to 30d)
+    notice = signals.get("notice_period_days", 60)
+    if notice <= 0:
+        sub_scores.append(1.00)
+    elif notice <= 15:
+        sub_scores.append(0.98)
+    elif notice <= 30:
+        sub_scores.append(0.90)
+    elif notice <= 60:
+        sub_scores.append(0.65)
+    elif notice <= 90:
+        sub_scores.append(0.40)
+    elif notice <= 120:
+        sub_scores.append(0.20)
+    else:
+        sub_scores.append(0.08)
+
+    # 7. Profile completeness
+    pc = signals.get("profile_completeness_score", 50)
+    sub_scores.append(normalize(float(pc), 20, 100))
+
+    # 8. Saved by recruiters in last 30 days (social proof — others find them relevant)
+    saved = signals.get("saved_by_recruiters_30d", 0)
+    sub_scores.append(min(1.0, saved / 8.0))
+
+    # 9. Skill assessment scores (taking assessments = shows initiative and transparency)
+    assessments = signals.get("skill_assessment_scores", {})
+    if assessments:
+        avg_assess = sum(assessments.values()) / len(assessments)
+        sub_scores.append(normalize(avg_assess, 30, 90))
+    else:
+        sub_scores.append(0.25)   # No assessments — mild negative
+
+    # 10. Average response time (fast responders are easier to hire)
+    avg_rt = signals.get("avg_response_time_hours", -1)
+    if avg_rt < 0:
+        sub_scores.append(0.50)   # unknown
+    elif avg_rt <= 4:
+        sub_scores.append(1.00)
+    elif avg_rt <= 24:
+        sub_scores.append(0.90)
+    elif avg_rt <= 72:
+        sub_scores.append(0.65)
+    elif avg_rt <= 168:
+        sub_scores.append(0.40)
+    else:
+        sub_scores.append(0.15)
+
+    return sum(sub_scores) / len(sub_scores)
+
+
 if __name__ == "__main__":
-    print("Skill and title scorers loaded OK.")
+    print("Experience, production, and behavioral scorers loaded OK.")
