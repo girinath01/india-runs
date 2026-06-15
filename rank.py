@@ -752,9 +752,10 @@ AVAIL_LONG = [
 
 def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
                         consult_frac: float, prod_ratio: float, notice: int,
-                        final_score: float) -> str:
+                        final_score: float) -> tuple[str, str, str]:
     """
     Generates a specific 1-2 sentence reasoning for Stage 4 manual review using profile-aware templates.
+    Returns (confidence_str, reason_str, category_for_mmr)
     """
     tier1_hits = [
         s.get("name", "") for s in skills
@@ -763,41 +764,53 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
                 for kw in TIER1_SKILLS)
     ]
     
-    career_desc = " ".join(j.get("description", "") or "" for j in career).lower()
-    full_text = profile.get("headline", "").lower() + " " + profile.get("summary", "").lower() + " " + career_desc
-    
     s1 = tier1_hits[0] if len(tier1_hits) > 0 else "relevant skills"
     s2 = tier1_hits[1] if len(tier1_hits) > 1 else "core retrieval tools"
     
-    # Profile signals
-    has_ltr = any(kw in full_text for kw in ("learning to rank", "ltr", "lambdamart", "bm25", "ranking system"))
-    has_search = any(kw in full_text for kw in ("opensearch", "elasticsearch", "search system", "search infra"))
-    has_rec = any(kw in full_text for kw in ("recommendation system", "personalization", "recommender"))
-    has_sem = any(kw in full_text for kw in ("semantic search", "nlp", "sentence transformer", "embedding"))
-    has_vec = any(kw in full_text for kw in ("faiss", "qdrant", "milvus", "weaviate", "pinecone", "pgvector"))
-    has_rag = any(kw in full_text for kw in ("rag", "langchain", "llm"))
-    has_prod = any(kw in full_text for kw in ("production", "shipped", "deployed", "live system", "scaled"))
-    has_balanced = has_search and has_rec and has_ltr
+    # Strictly scan verified skills list
+    skill_names = [s.get("name", "").lower() for s in skills]
+    has_ltr = any("learning to rank" in s or "ltr" in s or "lambdamart" in s for s in skill_names)
+    has_rec = any("recommendation" in s for s in skill_names)
+    has_search = any("opensearch" in s or "elasticsearch" in s or "solr" in s for s in skill_names)
+    has_sem = any("semantic search" in s or "nlp" in s for s in skill_names)
+    has_vec = any("faiss" in s or "qdrant" in s or "milvus" in s or "weaviate" in s or "pinecone" in s for s in skill_names)
+    has_rag = any("rag" in s or "langchain" in s for s in skill_names)
     
-    # Select template pool
-    if has_balanced:
-        pool = TPL_BALANCED
-    elif has_ltr:
+    # Determine confidence score string
+    conf_pct = min(99, int((final_score / 1.1) * 100))
+    if final_score > 0.90:
+        tone_adj = "strong"
+        conf_str = f"High ({conf_pct}%)"
+    elif final_score > 0.80:
+        tone_adj = "moderate"
+        conf_str = f"Medium ({conf_pct}%)"
+    else:
+        tone_adj = "partial"
+        conf_str = f"Low ({conf_pct}%)"
+    
+    # Select template pool strictly based on skills list
+    category_for_mmr = "DEFAULT"
+    if has_ltr:
         pool = TPL_RANKING
+        category_for_mmr = "RANKING"
     elif has_rec:
         pool = TPL_REC
+        category_for_mmr = "REC"
     elif has_search:
         pool = TPL_SEARCH
-    elif has_vec:
-        pool = TPL_VECTOR
+        category_for_mmr = "SEARCH"
     elif has_sem:
         pool = TPL_SEMANTIC
-    elif has_prod:
-        pool = TPL_PROD
+        category_for_mmr = "SEMANTIC"
+    elif has_vec:
+        pool = TPL_VECTOR
+        category_for_mmr = "VECTOR"
     elif has_rag:
         pool = TPL_RAG
+        category_for_mmr = "RAG"
     else:
-        pool = TPL_DEFAULT
+        pool = TPL_BALANCED
+        category_for_mmr = "BALANCED"
         
     cid = profile.get("id", "CAND")
     variant = (len(career) * 7 + len(skills)) % len(pool)
@@ -815,26 +828,26 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
     if final_score > 0.70:
         if notice <= 30:
             avail_str = AVAIL_SHORT[len(career) % len(AVAIL_SHORT)].format(notice=notice)
-            return base_reason + avail_str
+            return conf_str, f"Match Confidence: {conf_str} — " + base_reason + avail_str, category_for_mmr
         elif notice >= 60:
             avail_str = AVAIL_LONG[len(skills) % len(AVAIL_LONG)].format(notice=notice)
-            return base_reason + avail_str
+            return conf_str, f"Match Confidence: {conf_str} — " + base_reason + avail_str, category_for_mmr
         else:
-            return base_reason
+            return conf_str, f"Match Confidence: {conf_str} — " + base_reason, category_for_mmr
     else:
         if not tier1_hits:
-            return f"Missing core retrieval/search skills for the founding role. Notice period: {notice} days."
-        return f"Partial match with {s1} and {s2}, but lacks strong production or seniority signals."
+            return conf_str, f"Match Confidence: {conf_str} — Missing core retrieval/search skills for the founding role. Notice period: {notice} days.", category_for_mmr
+        return conf_str, f"Match Confidence: {conf_str} — Partial match with {s1} and {s2}, but lacks strong production or seniority signals.", category_for_mmr
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DEEP SCORER  (called only on Pass 2 shortlist)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def deep_score(candidate: dict) -> tuple[float, str]:
+def deep_score(candidate: dict) -> tuple[float, str, str, str]:
     """
     Full 5-component scoring + hard penalties.
-    Returns (final_score: 0-1, reasoning: str)
+    Returns (final_score: float, conf_str: str, reasoning: str, category_for_mmr: str)
     """
     profile  = candidate.get("profile", {}) or {}
     career   = candidate.get("career_history", []) or []
@@ -842,10 +855,10 @@ def deep_score(candidate: dict) -> tuple[float, str]:
     signals  = candidate.get("redrob_signals", {}) or {}
 
     if is_honeypot(candidate):
-        return 0.0, (
+        return 0.0, "Low (0%)", (
             "Flagged as honeypot: internally inconsistent profile data "
             "(impossible tenure, inflated experience, or expert/zero-duration skills)."
-        )
+        ), "DEFAULT"
 
     # [B1] FIXED: single source of truth for notice — one variable, one default
     notice = int(signals.get("notice_period_days", 60) or 60)
@@ -897,16 +910,20 @@ def deep_score(candidate: dict) -> tuple[float, str]:
     elif notice <= 90: notice_boost = -0.04
     else: notice_boost = -0.08
 
-    # NEW: 7. Explicit JD skill boosts
+    # NEW: 7. Explicit JD skill depth weights
     jd_skill_boost = 0.0
     if "learning to rank" in full_text or "ltr" in full_text or "lambdamart" in full_text:
-        jd_skill_boost += 0.08
-    if "bm25" in full_text:
-        jd_skill_boost += 0.06
-    if "ranking system" in full_text or "search ranking" in full_text:
-        jd_skill_boost += 0.08
-    if "information retrieval" in full_text:
-        jd_skill_boost += 0.06
+        jd_skill_boost += 0.100
+    if "recommendation" in full_text or "recommender" in full_text:
+        jd_skill_boost += 0.095
+    if "opensearch" in full_text or "elasticsearch" in full_text:
+        jd_skill_boost += 0.090
+    if "weaviate" in full_text or "qdrant" in full_text:
+        jd_skill_boost += 0.085
+    if "faiss" in full_text or "semantic search" in full_text:
+        jd_skill_boost += 0.080
+    if "rag" in full_text or "langchain" in full_text:
+        jd_skill_boost += 0.055
 
     # NEW: 8. Tie breakers
     rr = float(signals.get("recruiter_response_rate", 0) or 0)
@@ -942,11 +959,11 @@ def deep_score(candidate: dict) -> tuple[float, str]:
     raw = base_raw + exp_boost + title_boost + res_penalty + notice_boost + prod_boost + jd_skill_boost + tie_break
     final = max(0.0, raw - penalties)
 
-    reasoning = generate_reasoning(
+    conf, reasoning, category = generate_reasoning(
         profile, career, skills, signals,
         consult_frac, prod_ratio, notice, final
     )
-    return final, reasoning
+    return final, conf, reasoning, category
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1034,30 +1051,58 @@ def rank_candidates(input_path: str, output_path: str, top_k: int = 3000) -> Non
 
     # ── PASS 2 ────────────────────────────────────────────────────────────────
     print(f"\n[Pass 2] Deep scoring top {len(pool)} candidates...")
-    deep_results: list[tuple[str, float, str]] = []
+    deep_results: list[tuple[str, float, str, str, str]] = []
 
     for i, (_, cid, c) in enumerate(pool):
-        score, reasoning = deep_score(c)
-        deep_results.append((cid, score, reasoning))
+        score, conf, reasoning, category = deep_score(c)
+        deep_results.append((cid, score, conf, reasoning, category))
         if (i + 1) % 500 == 0:
             print(f"  {i+1}/{len(pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
 
     print(f"[Pass 2] Done in {time.time()-t0:.1f}s")
 
     if deep_results:
-        max_raw = max(sc for _, sc, _ in deep_results)
+        max_raw = max(sc for _, sc, _, _, _ in deep_results)
         if max_raw > 0:
             deep_results = [
-                (cid, (sc / max_raw) * 0.991, r)
-                for cid, sc, r in deep_results
+                (cid, (sc / max_raw) * 0.991, conf, r, cat)
+                for cid, sc, conf, r, cat in deep_results
             ]
 
     # Sort: score desc, candidate_id asc (deterministic tie-break per spec §3)
     deep_results.sort(key=lambda x: (-x[1], x[0]))
     top_100 = deep_results[:100]
 
+    # Diversity Re-ranking (Top 20 Only)
+    top_20 = top_100[:20]
+    diverse_top_20 = []
+    remaining = top_20.copy()
+    
+    if remaining:
+        # 1. Pick the absolute best candidate first
+        diverse_top_20.append(remaining.pop(0))
+        
+        # 2. Greedily pick the remaining 19 candidates maximizing Score - 0.05 * Similarity
+        while remaining:
+            best_idx = -1
+            best_mmr_score = -999.0
+            
+            for i, cand in enumerate(remaining):
+                cand_cat = cand[4]
+                # Sim is 1.0 if category already exists in selected, else 0.0
+                sim = 1.0 if any(sel[4] == cand_cat for sel in diverse_top_20) else 0.0
+                mmr_score = cand[1] - (0.05 * sim)
+                
+                if mmr_score > best_mmr_score:
+                    best_mmr_score = mmr_score
+                    best_idx = i
+                    
+            diverse_top_20.append(remaining.pop(best_idx))
+            
+    top_100 = diverse_top_20 + top_100[20:]
+
     # Honeypot audit
-    hp_count = sum(1 for _, sc, _ in top_100 if sc == 0.0)
+    hp_count = sum(1 for _, sc, _, _, _ in top_100 if sc == 0.0)
     hp_rate  = hp_count / 100
     flag     = "[WARNING] EXCEEDS 10% THRESHOLD" if hp_rate > 0.10 else "[OK]"
     print(f"\n[Audit]  Honeypots in top 100: {hp_count} ({hp_rate:.0%})  {flag}")
@@ -1068,9 +1113,9 @@ def rank_candidates(input_path: str, output_path: str, top_k: int = 3000) -> Non
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["candidate_id", "rank", "score", "reasoning"])
-        for rank, (cid, score, reasoning) in enumerate(top_100, start=1):
-            writer.writerow([cid, rank, f"{score:.6f}", reasoning])
+        writer.writerow(["candidate_id", "rank", "score", "confidence", "reasoning"])
+        for rank, (cid, score, conf, reasoning, cat) in enumerate(top_100, start=1):
+            writer.writerow([cid, rank, f"{score:.6f}", conf, reasoning])
 
     elapsed = time.time() - t0
     print(f"\n[Done]  {out_path}  written in {elapsed:.1f}s")
@@ -1079,7 +1124,7 @@ def rank_candidates(input_path: str, output_path: str, top_k: int = 3000) -> Non
 
     print(f"\n{'Rank':>4}  {'Candidate ID':16}  {'Score':>7}  Reasoning (preview 70 chars)")
     print("-" * 106)
-    for rank, (cid, score, reasoning) in enumerate(top_100[:10], start=1):
+    for rank, (cid, score, conf, reasoning, cat) in enumerate(top_100[:10], start=1):
         print(f"{rank:>4}  {cid:16}  {score:>7.4f}  {reasoning[:70]}")
     print(f"\nScore range: {top_100[-1][1]:.4f} – {top_100[0][1]:.4f}")
 
