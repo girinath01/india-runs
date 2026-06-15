@@ -479,6 +479,19 @@ def score_behavioral(signals: dict) -> float:
     else:
         sub_scores.append(0.15)
 
+    # Bonus: actively applying (applications_submitted_30d > 0 = in job-search mode)
+    apps = signals.get("applications_submitted_30d", 0)
+    if apps >= 3:
+        sub_scores.append(0.90)
+    elif apps >= 1:
+        sub_scores.append(0.75)
+    else:
+        sub_scores.append(0.40)  # not applying = may not be looking
+
+    # Bonus: verified contact info (reliability signal)
+    verified = signals.get("verified_email", False) and signals.get("verified_phone", False)
+    sub_scores.append(0.90 if verified else 0.45)
+
     return sum(sub_scores) / len(sub_scores)
 
 
