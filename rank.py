@@ -574,5 +574,271 @@ def detect_honeypot(candidate: dict) -> bool:
     return False
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MASTER SCORING FUNCTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_score(candidate: dict) -> tuple:
+    """
+    Compute the final weighted score and generate a specific reasoning string.
+
+    Component weights (sum = 1.0):
+      Skills match         0.28
+      Title/career fit     0.22
+      Production exp       0.20
+      Years of experience  0.12
+      Behavioral signals   0.10
+      Location fit         0.06
+      Education            0.02
+
+    Disqualifier multipliers applied after weighted sum.
+    Returns: (score: float [0-1], reasoning: str)
+    """
+    profile = candidate.get("profile", {})
+    career = candidate.get("career_history", [])
+    skills = candidate.get("skills", [])
+    education = candidate.get("education", [])
+    signals = candidate.get("redrob_signals", {})
+
+    # ── Honeypot guard ───────────────────────────────────────────────────────
+    if detect_honeypot(candidate):
+        return 0.0, "Profile flagged as honeypot: internally inconsistent data (impossible tenure or inflated experience)."
+
+    # ── Build extra text for skills scorer (summary + headline) ─────────────
+    summary = profile.get("summary", "")
+    headline = profile.get("headline", "")
+    extra_text = f"{headline} {summary}"
+
+    # ── Component scores ─────────────────────────────────────────────────────
+    ai_skill_score, disq_frac = score_skills(skills, extra_text)
+    title_score, is_non_tech, consult_frac = score_title_fit(profile, career)
+    prod_score = score_production_vs_research(career)
+    exp_score = score_experience_years(profile)
+    behavioral_score = score_behavioral(signals)
+    location_score = score_location(profile, signals)
+    edu_score = score_education(education)
+
+    # ── Disqualifier penalty multipliers ────────────────────────────────────
+    penalty = 1.0
+
+    # Consulting-only career — JD explicitly disqualifies this
+    if consult_frac >= 0.95:
+        penalty *= 0.12    # Entire career at IT services
+    elif consult_frac >= 0.80:
+        penalty *= 0.28
+    elif consult_frac >= 0.65:
+        penalty *= 0.50
+    elif consult_frac >= 0.50:
+        penalty *= 0.72
+
+    # Non-technical title throughout career
+    if is_non_tech and title_score < 0.15:
+        penalty *= 0.18
+
+    # CV/Speech/Robotics primary focus — wrong domain
+    if disq_frac > 0.65:
+        penalty *= 0.22
+    elif disq_frac > 0.45:
+        penalty *= 0.52
+
+    # Pure researcher with no production signal
+    if prod_score < 0.10 and ai_skill_score < 0.15:
+        penalty *= 0.38
+
+    # ── Weighted sum ─────────────────────────────────────────────────────────
+    raw = (
+        0.28 * ai_skill_score
+        + 0.22 * title_score
+        + 0.20 * prod_score
+        + 0.12 * exp_score
+        + 0.10 * behavioral_score
+        + 0.06 * location_score
+        + 0.02 * edu_score
+    )
+
+    final_score = clamp(raw * penalty)
+
+    # ── Reasoning (specific facts, JD-connected, honest about concerns) ──────
+    years = profile.get("years_of_experience", 0)
+    curr_title = profile.get("current_title", "N/A")
+    curr_company = profile.get("current_company", "")
+    location = profile.get("location", "N/A")
+    country = profile.get("country", "")
+    notice = signals.get("notice_period_days", 0)
+    rr = signals.get("recruiter_response_rate", 0)
+    otw = signals.get("open_to_work_flag", False)
+    gh = signals.get("github_activity_score", -1)
+    last_active_str = signals.get("last_active_date", "")
+
+    # Pick the top relevant skill names from skills list
+    rel_skills = [
+        s.get("name", "") for s in skills
+        if any(kw in s.get("name", "").lower() or s.get("name", "").lower() in kw
+               for kw in REQUIRED_SKILLS)
+    ]
+    top_skills_str = ", ".join(rel_skills[:3]) if rel_skills else "general engineering"
+
+    # Location string
+    loc_str = location
+    if country and country.lower() not in ("india", "in", ""):
+        loc_str = f"{location}, {country}"
+
+    # Collect strengths
+    strengths = []
+    if ai_skill_score >= 0.50:
+        strengths.append("strong AI/ML skill match")
+    if prod_score >= 0.65:
+        strengths.append("clear production deployment evidence")
+    if title_score >= 0.60:
+        strengths.append("relevant technical title")
+    if gh >= 40:
+        strengths.append(f"active GitHub (score {gh:.0f})")
+    if otw:
+        strengths.append("actively open to work")
+    if notice <= 30:
+        strengths.append(f"{notice}d notice")
+
+    # Collect concerns (be honest — Stage 4 checks for this)
+    concerns = []
+    if consult_frac > 0.65:
+        concerns.append(f"consulting-heavy career ({consult_frac:.0%} in IT services)")
+    if is_non_tech:
+        concerns.append("non-technical current title")
+    if disq_frac > 0.40:
+        concerns.append("CV/Speech/Robotics focus vs NLP/IR required")
+    if notice > 60:
+        concerns.append(f"{notice}d notice period")
+    if not otw:
+        concerns.append("not marked open-to-work")
+    if last_active_str:
+        try:
+            la = datetime.strptime(last_active_str, "%Y-%m-%d").date()
+            days_ago = (TODAY - la).days
+            if days_ago > 90:
+                concerns.append(f"inactive {days_ago}d")
+        except ValueError:
+            pass
+    if rr < 0.25:
+        concerns.append(f"low recruiter response rate ({rr:.0%})")
+
+    # Assemble reasoning (specific, factual, not templated)
+    company_str = f" at {curr_company}" if curr_company else ""
+    parts = [f"{curr_title}{company_str}, {years:.1f}yr exp, {loc_str}."]
+    parts.append(f"Key skills: {top_skills_str}.")
+    if strengths:
+        parts.append(f"Strengths: {'; '.join(strengths[:2])}.")
+    if concerns:
+        parts.append(f"Concerns: {'; '.join(concerns[:2])}.")
+    parts.append(f"Response rate {rr:.0%}, notice {notice}d.")
+
+    reasoning = " ".join(parts)
+    if len(reasoning) > 400:
+        reasoning = reasoning[:397] + "..."
+
+    return final_score, reasoning
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RANKING PIPELINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def rank_candidates(input_path: str, output_path: str):
+    """Stream candidates from JSONL, score all, output top-100 CSV."""
+    path = Path(input_path)
+    if not path.exists():
+        print(f"ERROR: File not found: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[Bug Hunters Ranker] Input : {input_path}")
+    print(f"[Bug Hunters Ranker] Output: {output_path}")
+    print("[Bug Hunters Ranker] Scoring candidates...")
+
+    import gzip
+    if path.suffix == ".gz":
+        opener = lambda: gzip.open(path, "rt", encoding="utf-8")
+    else:
+        opener = lambda: open(path, "r", encoding="utf-8")
+
+    all_scores = []
+    count = 0
+
+    with opener() as f:
+        raw = f.read()
+
+    raw = raw.strip()
+    if raw.startswith("["):
+        # JSON array (e.g. sample_candidates.json)
+        try:
+            candidates_list = json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"ERROR: Could not parse JSON array: {e}", file=sys.stderr)
+            sys.exit(1)
+        for c in candidates_list:
+            cid = c.get("candidate_id", "")
+            if not cid:
+                continue
+            score, reasoning = compute_score(c)
+            all_scores.append((cid, score, reasoning))
+            count += 1
+    else:
+        # JSONL — process line by line (memory efficient for 100K candidates)
+        with opener() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    c = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                cid = c.get("candidate_id", "")
+                if not cid:
+                    continue
+                score, reasoning = compute_score(c)
+                all_scores.append((cid, score, reasoning))
+                count += 1
+                if count % 10_000 == 0:
+                    print(f"  ...scored {count:,} candidates", flush=True)
+
+    print(f"[Bug Hunters Ranker] Scored {count:,} total.")
+
+    # Sort: descending score, ascending candidate_id for tie-breaks (spec requirement)
+    all_scores.sort(key=lambda x: (-x[1], x[0]))
+    top_100 = all_scores[:100]
+
+    # Write CSV
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["candidate_id", "rank", "score", "reasoning"])
+        for rank, (cid, score, reasoning) in enumerate(top_100, start=1):
+            writer.writerow([cid, rank, f"{score:.6f}", reasoning])
+
+    print(f"\n[Bug Hunters Ranker] Written: {out_path}")
+    print("\nTop 10:")
+    print(f"{'Rank':>4}  {'Candidate':14}  {'Score':>7}  Reasoning (preview)")
+    print("-" * 90)
+    for rank, (cid, score, reasoning) in enumerate(top_100[:10], start=1):
+        print(f"{rank:>4}  {cid:14}  {score:>7.4f}  {reasoning[:60]}...")
+    if top_100:
+        print(f"\nScore range: [{top_100[-1][1]:.4f} – {top_100[0][1]:.4f}]")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Bug Hunters — Redrob Hackathon Candidate Ranker\n"
+                    "Produces top-100 submission CSV for the Senior AI Engineer JD.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--candidates", required=True,
+                        help="Path to candidates.jsonl or candidates.jsonl.gz")
+    parser.add_argument("--out", required=True,
+                        help="Output path for submission CSV")
+    args = parser.parse_args()
+    rank_candidates(args.candidates, args.out)
+
+
 if __name__ == "__main__":
-    print("All component scorers and honeypot detector loaded OK.")
+    main()
+
