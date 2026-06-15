@@ -164,6 +164,145 @@ def normalize(value, min_v, max_v):
     return clamp((value - min_v) / (max_v - min_v))
 
 
-# Scorers will go here next
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT SCORERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def score_skills(skills: list, extra_text: str = "") -> tuple:
+    """
+    Returns (ai_skill_score [0-1], disq_skill_fraction [0-1])
+
+    ai_skill_score: proficiency + endorsement + duration weighted match vs JD
+    disq_skill_fraction: fraction of weight coming from CV/Speech/Robotics skills
+
+    Also scans extra_text (profile summary + headline) for JD keywords —
+    catches plain-language Tier 5 candidates who describe experience in prose
+    without using keyword-heavy skill lists.
+    """
+    if not skills and not extra_text:
+        return 0.0, 0.0
+
+    total_weight = 0.0
+    matched_weight = 0.0
+    disq_weight = 0.0
+
+    for skill in skills:
+        name_raw = skill.get("name", "")
+        name = name_raw.lower().strip()
+        proficiency = skill.get("proficiency", "beginner")
+        endorsements = min(skill.get("endorsements", 0), 100)
+        duration = min(skill.get("duration_months", 0), 72)
+
+        prof_w = PROFICIENCY_WEIGHTS.get(proficiency, 0.15)
+        endorse_bonus = (endorsements / 100.0) * 0.20   # up to +0.20
+        duration_bonus = (duration / 72.0) * 0.20        # up to +0.20
+
+        skill_weight = prof_w * (1.0 + endorse_bonus + duration_bonus)
+        total_weight += skill_weight
+
+        # JD keyword match (substring in both directions to catch partials)
+        is_match = any(kw in name or name in kw for kw in REQUIRED_SKILLS)
+        if is_match:
+            matched_weight += skill_weight
+
+        # Disqualifying domain check
+        is_disq = any(dq in name or name in dq for dq in DISQUALIFYING_SKILL_FOCUS)
+        if is_disq:
+            disq_weight += skill_weight
+
+    # Also scan free text (summary / headline) for JD concept areas
+    # Weighted lower than skills list — free text is noisier
+    if extra_text:
+        text_l = extra_text.lower()
+        JD_CONCEPT_CHECKS = [
+            any(kw in text_l for kw in ["embedding", "retrieval", "semantic search", "dense"]),
+            any(kw in text_l for kw in ["vector", "pinecone", "weaviate", "faiss", "qdrant", "milvus"]),
+            any(kw in text_l for kw in ["ranking", "recommendation", "recommender", "ltr", "rerank"]),
+            any(kw in text_l for kw in ["nlp", "natural language", "language model", "llm", "bert"]),
+            any(kw in text_l for kw in ["rag", "retrieval augmented"]),
+            any(kw in text_l for kw in ["a/b test", "ab test", "ndcg", "mrr", "offline eval"]),
+            any(kw in text_l for kw in ["python", "pytorch", "tensorflow", "deep learning"]),
+        ]
+        text_score = sum(JD_CONCEPT_CHECKS) / len(JD_CONCEPT_CHECKS)
+        # Blend text score in at 30% weight relative to skills list
+        text_synthetic_weight = total_weight * 0.3 if total_weight > 0 else 5.0
+        total_weight += text_synthetic_weight
+        matched_weight += text_score * text_synthetic_weight
+
+    if total_weight == 0:
+        return 0.0, 0.0
+
+    skill_score = clamp(matched_weight / total_weight)
+    disq_frac = clamp(disq_weight / (total_weight * 0.7 + 1e-9))  # normalize against skills-only weight
+    return skill_score, disq_frac
+
+
+def score_title_fit(profile: dict, career_history: list) -> tuple:
+    """
+    Returns (title_score [0-1], is_non_tech bool, consulting_fraction [0-1])
+
+    Consulting detection uses the `industry` field in career_history —
+    this is more reliable than company name matching since many consulting
+    companies operate under subsidiary names that aren't in our list.
+    """
+    current_title = profile.get("current_title", "").lower()
+    current_industry = profile.get("current_industry", "").lower()
+
+    # Score current title against target technical roles
+    title_score = 0.0
+    for target in TARGET_TITLES:
+        if target in current_title:
+            title_score = 1.0
+            break
+
+    is_non_tech = any(t in current_title for t in NON_TECH_TITLES)
+    if is_non_tech:
+        title_score = max(0.0, title_score * 0.1)
+
+    # Walk career history: score historical technical titles + consulting fraction
+    hist_tech_score = 0.0
+    total_months = 0
+    consulting_months = 0
+
+    for job in career_history:
+        job_title = job.get("title", "").lower()
+        company = job.get("company", "").lower()
+        industry = job.get("industry", "").lower()
+        duration = max(0, job.get("duration_months", 0))
+        total_months += duration
+
+        # Technical title check in history
+        for target in TARGET_TITLES:
+            if target in job_title:
+                hist_tech_score = max(hist_tech_score, 0.85)
+                break
+
+        # Consulting detection: prefer industry field, fall back to company name
+        is_consulting = (
+            any(ci in industry for ci in CONSULTING_INDUSTRIES)
+            or any(cn in company for cn in CONSULTING_COMPANY_NAMES)
+        )
+        if is_consulting:
+            consulting_months += duration
+
+    # Also check current company industry (profile-level field)
+    if any(ci in current_industry for ci in CONSULTING_INDUSTRIES):
+        # If current role is consulting, add its implied months
+        if career_history:
+            current_job = next((j for j in career_history if j.get("is_current")), None)
+            if current_job:
+                pass  # already counted above
+            else:
+                # Approximate 12 months if we can't find current job
+                consulting_months += 12
+                total_months += 12
+
+    consulting_fraction = consulting_months / total_months if total_months > 0 else 0.0
+
+    # Blend current title (60%) + historical technical score (40%)
+    final_score = clamp(0.6 * title_score + 0.4 * hist_tech_score)
+    return final_score, is_non_tech, consulting_fraction
+
+
 if __name__ == "__main__":
-    print("Signal definitions loaded. Scorers coming next.")
+    print("Skill and title scorers loaded OK.")
