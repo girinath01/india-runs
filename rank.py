@@ -1,829 +1,857 @@
 #!/usr/bin/env python3
 """
-Redrob Hackathon — Candidate Ranker (Bug Hunters)
+Redrob Hackathon — Candidate Ranker v2 (Bug Hunters)
 JD: Senior AI Engineer — Founding Team @ Redrob AI
 
-WIP — adding signal definitions first, scorers next.
+Scoring formula (revised based on JD analysis):
+  FinalScore = 0.35*skill_fit + 0.25*product_fit + 0.20*behavioral
+               + 0.10*experience_fit + 0.10*location_notice_fit
+               - hard_penalties
+
+Key design principles:
+  1. Retrieval/Search/Ranking/Vector DBs >> trendy LLM tooling (JD warns about this)
+  2. Shippers > Researchers — production deployment evidence is first-class signal
+  3. Availability matters: inactive candidate = effectively unavailable
+  4. Two-pass pipeline: 100K → fast filter → 3000 → deep score → 100
+
+Usage:
+  python rank.py --candidates ./candidates.jsonl --out ./bug_hunters.csv
 """
 
 import json
 import csv
 import argparse
 import sys
+import gzip
 from datetime import datetime, date
 from pathlib import Path
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# JD SIGNAL DEFINITIONS
-# Read the JD very carefully before touching these.
-# The key trap: keyword match is NOT enough. A "Marketing Manager"
-# with perfect AI keywords is NOT a fit. A Recommendation Systems Engineer
-# without "RAG"/"Pinecone" in their skills IS a fit.
+# TIERED SKILL DEFINITIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Core required skills from the JD (embeddings, vector DBs, evaluation, NLP)
-REQUIRED_SKILLS = {
-    # Embeddings & Retrieval — JD explicitly needs PRODUCTION experience here
-    "sentence-transformers", "sentence transformer", "embeddings", "embedding",
-    "openai embeddings", "text-embedding", "bge", "e5 model", "ada",
-    "cohere embed", "dense retrieval", "sparse retrieval",
-    "hybrid retrieval", "hybrid search",
-    "bi-encoder", "cross-encoder", "semantic search", "semantic similarity",
-    "retrieval", "information retrieval", "dense passage retrieval", "dpr",
-    # Vector Databases — JD explicitly needs PRODUCTION experience here
-    "pinecone", "weaviate", "qdrant", "milvus", "faiss", "opensearch",
-    "elasticsearch", "chroma", "pgvector", "vespa", "annoy", "scann",
-    "vector database", "vector db", "vector store", "vector index",
-    "vector search", "ann", "approximate nearest neighbor", "hnsw",
-    # RAG & Search
-    "rag", "retrieval augmented generation", "bm25", "tfidf", "tf-idf",
-    "reranking", "re-ranking", "reranker", "colbert",
-    # Ranking & Recommendation (recommendation system counts per JD)
+# Tier 1 — Core JD requirements: retrieval, search, ranking, vector DBs, eval
+# These are the skills the JD explicitly says are REQUIRED in production
+TIER1_SKILLS = {
+    # Retrieval & Search Systems
+    "retrieval", "information retrieval", "dense retrieval", "sparse retrieval",
+    "hybrid retrieval", "hybrid search", "semantic search", "vector search",
+    "search engine", "search ranking", "search system", "search infrastructure",
+    # Recommendation & Ranking Systems
+    "recommendation system", "recommender", "recommender system", "ranking system",
     "learning to rank", "ltr", "lambdamart", "lambdarank", "ranknet",
-    "recommendation system", "recommender", "ranking system", "search ranking",
+    # Embeddings & Vector DBs (JD explicitly requires PRODUCTION experience here)
+    "embeddings", "embedding", "sentence-transformers", "sentence transformer",
+    "text embedding", "openai embeddings", "bge", "e5 model", "dense embedding",
+    "bi-encoder", "cross-encoder",
+    "faiss", "elasticsearch", "opensearch", "qdrant", "milvus",
+    "weaviate", "pinecone", "pgvector", "vespa", "annoy", "scann", "chroma",
+    "vector database", "vector db", "vector store", "vector index",
+    "ann", "approximate nearest neighbor", "hnsw",
+    # RAG & Reranking
+    "rag", "retrieval augmented generation",
+    "reranking", "re-ranking", "reranker", "colbert",
+    "bm25", "tfidf", "tf-idf",
+    # Evaluation frameworks (JD explicitly requires designing these)
     "ndcg", "mrr", "mean reciprocal rank", "map", "mean average precision",
     "a/b testing", "ab testing", "offline evaluation", "online evaluation",
     "eval framework", "evaluation framework",
-    # NLP & LLMs
+}
+
+# Tier 2 — Strong supporting skills (medium contribution)
+TIER2_SKILLS = {
     "nlp", "natural language processing", "language model", "text classification",
     "bert", "transformers", "huggingface", "hugging face",
-    "llm", "large language model", "generative ai", "gpt",
-    "fine-tuning", "fine tuning", "finetuning", "lora", "qlora", "peft",
-    "prompt engineering", "instruction tuning",
-    # ML Engineering
-    "machine learning", "deep learning", "neural network",
     "pytorch", "tensorflow", "keras", "jax",
-    "xgboost", "lightgbm", "gradient boosting",
-    "scikit-learn", "sklearn",
     "mlops", "model deployment", "model serving", "inference",
     "feature engineering", "feature store",
-    # Engineering fundamentals for product role
-    "python", "fastapi", "flask", "api", "microservices", "docker", "kubernetes",
-    "spark", "kafka", "airflow",
-    "aws", "gcp", "azure", "cloud",
-    "sql", "postgresql", "mongodb", "redis",
     "distributed systems", "distributed training",
-    # Specific tools mentioned in JD
-    "weights & biases", "wandb", "mlflow", "ray", "dask",
-    "triton", "tensorrt", "onnx",
+    "mlflow", "weights & biases", "wandb", "ray", "dask",
+    "xgboost", "lightgbm", "gradient boosting",
+    "scikit-learn", "sklearn",
+    "python", "fastapi", "flask", "docker", "kubernetes",
+    "spark", "kafka", "airflow",
+    "aws", "gcp", "azure",
 }
 
-# Nice-to-have (lower weight contribution)
-NICE_TO_HAVE_SKILLS = {
+# Tier 3 — Trendy LLM tooling (low weight)
+# JD explicitly warns against over-indexing on these:
+# "If your experience consists of LangChain calling OpenAI — probably not"
+TIER3_SKILLS = {
+    "langchain", "lang chain",
+    "prompt engineering", "instruction tuning",
+    "qlora", "lora", "peft", "fine-tuning", "fine tuning", "finetuning",
+    "llm", "large language model", "generative ai",
+    "openai", "chatgpt",
     "rlhf", "reinforcement learning from human feedback",
-    "data parallelism", "model parallelism", "quantization", "distillation",
-    "hr tech", "talent intelligence", "marketplace", "two-sided marketplace",
-    "open source", "github contributions",
+    "gpt",
 }
 
-# CV / Speech / Robotics — disqualifying if DOMINANT in skill profile
-# JD explicitly calls these out as "wrong domain"
-DISQUALIFYING_SKILL_FOCUS = {
+# Disqualifying domain focus: CV, Speech, Robotics (wrong domain, JD explicit)
+DISQUALIFYING_SKILLS = {
     "computer vision", "image classification", "object detection",
-    "yolo", "convolutional", "image segmentation", "instance segmentation",
-    "opencv", "open cv", "object recognition",
+    "yolo", "convolutional", "image segmentation",
+    "opencv", "open cv",
     "speech recognition", "asr", "tts", "text-to-speech", "speech synthesis",
     "audio processing", "sound classification", "voice recognition",
-    "robotics", "ros", "autonomous driving", "lidar", "slam", "point cloud",
-    # Non-ML roles
-    "photoshop", "illustrator", "figma", "adobe", "canva",
-    "six sigma", "lean", "kaizen",
-    "solidworks", "autocad", "ansys", "creo",
-    "accounting", "tally", "gst", "taxation",
+    "robotics", "ros", "autonomous driving", "lidar", "slam",
+    "photoshop", "illustrator", "figma", "canva",
+    "accounting", "tally", "gst", "salesforce", "crm",
     "seo", "content writing", "copywriting",
-    "salesforce", "crm",
+    "six sigma", "lean", "kaizen",
+    "solidworks", "autocad",
 }
 
-# Consulting companies by name (fallback if industry field unavailable)
-CONSULTING_COMPANY_NAMES = {
-    "tcs", "tata consultancy", "infosys", "wipro", "accenture", "cognizant",
-    "capgemini", "hcl", "tech mahindra", "mphasis", "hexaware", "mindtree",
-    "ltimindtree", "lti", "larsen toubro infotech", "niit technologies",
-    "persistent systems", "cyient", "zensar", "sonata software",
-    "kpit", "mastech", "igate", "firstsource", "wns", "genpact",
-    "birlasoft", "coforge", "happiest minds",
-}
-
-# Consulting by INDUSTRY FIELD — more reliable than company name matching
+# Consulting by industry field (reliable — part of the schema)
 CONSULTING_INDUSTRIES = {
     "it services", "it consulting", "consulting",
     "business process outsourcing", "bpo", "outsourcing",
-    "staffing", "staffing and recruiting", "managed services", "it staffing",
+    "staffing", "managed services", "it staffing",
 }
 
-# Target technical titles for this JD
-TARGET_TITLES = {
-    "ai engineer", "ml engineer", "machine learning engineer",
-    "nlp engineer", "search engineer", "information retrieval engineer",
-    "data scientist", "applied scientist", "research engineer",
-    "senior engineer", "principal engineer", "staff engineer",
-    "deep learning engineer", "recommendation engineer",
-    "ranking engineer", "relevance engineer", "search scientist",
-    "software engineer", "backend engineer", "platform engineer",
-    "applied ml", "applied ai", "ai researcher", "ml researcher",
-    "data engineer", "mlops engineer",
+# Consulting by company name (fallback)
+CONSULTING_NAMES = {
+    "tcs", "tata consultancy", "infosys", "wipro", "accenture", "cognizant",
+    "capgemini", "hcl", "tech mahindra", "mphasis", "hexaware", "mindtree",
+    "ltimindtree", "lti", "larsen toubro infotech", "niit technologies",
+    "persistent systems", "cyient", "zensar", "birlasoft", "coforge",
+    "kpit", "mastech", "firstsource", "wns", "genpact",
 }
 
-# Clearly non-technical — strong negative signal
+# Strong titles for this JD (with weights)
+STRONG_TITLE_SCORES = {
+    "search engineer": 1.0, "ranking engineer": 1.0,
+    "relevance engineer": 1.0, "search scientist": 1.0,
+    "recommendation engineer": 1.0, "recommendation systems engineer": 1.0,
+    "applied ml engineer": 0.95, "applied ml": 0.95,
+    "nlp engineer": 0.90, "ai engineer": 0.88,
+    "ml engineer": 0.88, "machine learning engineer": 0.88,
+    "applied scientist": 0.82, "research engineer": 0.75,
+    "principal engineer": 0.82, "staff engineer": 0.82,
+    "senior engineer": 0.72, "data scientist": 0.65,
+    "backend engineer": 0.55, "software engineer": 0.50,
+    "data engineer": 0.45,
+}
+
+# Non-technical titles (strong disqualifier)
 NON_TECH_TITLES = {
     "marketing manager", "hr manager", "human resources", "operations manager",
     "business analyst", "content writer", "sales executive", "accountant",
     "project manager", "graphic designer", "customer support", "customer service",
     "civil engineer", "mechanical engineer", "electrical engineer",
     "finance manager", "account manager", "talent acquisition", "recruiter",
-    "junior analyst", "data entry", "qa engineer", "tester",
-    "business development",
+    "data entry", "tester", "manual tester", "business development",
 }
 
-# JD preferred locations (Pune/Noida first, then other Tier-1 India cities)
-PREFERRED_INDIA_LOCATIONS = {
-    "pune",
-    "noida", "delhi", "delhi ncr", "ncr", "new delhi",
+# JD preferred India locations
+PREFERRED_LOCATIONS = {
+    "pune", "noida", "delhi", "delhi ncr", "ncr", "new delhi",
     "gurgaon", "gurugram", "faridabad", "greater noida",
     "hyderabad", "mumbai", "bangalore", "bengaluru",
 }
 
-# Proficiency → numeric weight mapping
 PROFICIENCY_WEIGHTS = {
-    "expert": 1.0,
-    "advanced": 0.75,
-    "intermediate": 0.45,
-    "beginner": 0.15,
+    "expert": 1.0, "advanced": 0.75, "intermediate": 0.45, "beginner": 0.15
 }
 
-TODAY = date(2026, 6, 15)  # Evaluation reference date
+TODAY = date(2026, 6, 15)
 
 
 def clamp(v, lo=0.0, hi=1.0):
-    return max(lo, min(hi, v))
-
-
-def normalize(value, min_v, max_v):
-    if max_v <= min_v:
-        return 0.0
-    return clamp((value - min_v) / (max_v - min_v))
+    return max(lo, min(hi, float(v)))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COMPONENT SCORERS
+# HONEYPOT DETECTION
 # ─────────────────────────────────────────────────────────────────────────────
 
-def score_skills(skills: list, extra_text: str = "") -> tuple:
+def is_honeypot(candidate: dict) -> bool:
     """
-    Returns (ai_skill_score [0-1], disq_skill_fraction [0-1])
-
-    ai_skill_score: proficiency + endorsement + duration weighted match vs JD
-    disq_skill_fraction: fraction of weight coming from CV/Speech/Robotics skills
-
-    Also scans extra_text (profile summary + headline) for JD keywords —
-    catches plain-language Tier 5 candidates who describe experience in prose
-    without using keyword-heavy skill lists.
-    """
-    if not skills and not extra_text:
-        return 0.0, 0.0
-
-    total_weight = 0.0
-    matched_weight = 0.0
-    disq_weight = 0.0
-
-    for skill in skills:
-        name_raw = skill.get("name", "")
-        name = name_raw.lower().strip()
-        proficiency = skill.get("proficiency", "beginner")
-        endorsements = min(skill.get("endorsements", 0), 100)
-        duration = min(skill.get("duration_months", 0), 72)
-
-        prof_w = PROFICIENCY_WEIGHTS.get(proficiency, 0.15)
-        endorse_bonus = (endorsements / 100.0) * 0.20   # up to +0.20
-        duration_bonus = (duration / 72.0) * 0.20        # up to +0.20
-
-        skill_weight = prof_w * (1.0 + endorse_bonus + duration_bonus)
-        total_weight += skill_weight
-
-        # JD keyword match (substring in both directions to catch partials)
-        is_match = any(kw in name or name in kw for kw in REQUIRED_SKILLS)
-        if is_match:
-            matched_weight += skill_weight
-
-        # Disqualifying domain check
-        is_disq = any(dq in name or name in dq for dq in DISQUALIFYING_SKILL_FOCUS)
-        if is_disq:
-            disq_weight += skill_weight
-
-    # Also scan free text (summary / headline) for JD concept areas
-    # Weighted lower than skills list — free text is noisier
-    if extra_text:
-        text_l = extra_text.lower()
-        JD_CONCEPT_CHECKS = [
-            any(kw in text_l for kw in ["embedding", "retrieval", "semantic search", "dense"]),
-            any(kw in text_l for kw in ["vector", "pinecone", "weaviate", "faiss", "qdrant", "milvus"]),
-            any(kw in text_l for kw in ["ranking", "recommendation", "recommender", "ltr", "rerank"]),
-            any(kw in text_l for kw in ["nlp", "natural language", "language model", "llm", "bert"]),
-            any(kw in text_l for kw in ["rag", "retrieval augmented"]),
-            any(kw in text_l for kw in ["a/b test", "ab test", "ndcg", "mrr", "offline eval"]),
-            any(kw in text_l for kw in ["python", "pytorch", "tensorflow", "deep learning"]),
-        ]
-        text_score = sum(JD_CONCEPT_CHECKS) / len(JD_CONCEPT_CHECKS)
-        # Blend text score in at 30% weight relative to skills list
-        text_synthetic_weight = total_weight * 0.3 if total_weight > 0 else 5.0
-        total_weight += text_synthetic_weight
-        matched_weight += text_score * text_synthetic_weight
-
-    if total_weight == 0:
-        return 0.0, 0.0
-
-    skill_score = clamp(matched_weight / total_weight)
-    disq_frac = clamp(disq_weight / (total_weight * 0.7 + 1e-9))  # normalize against skills-only weight
-    return skill_score, disq_frac
-
-
-def score_title_fit(profile: dict, career_history: list) -> tuple:
-    """
-    Returns (title_score [0-1], is_non_tech bool, consulting_fraction [0-1])
-
-    Consulting detection uses the `industry` field in career_history —
-    this is more reliable than company name matching since many consulting
-    companies operate under subsidiary names that aren't in our list.
-    """
-    current_title = profile.get("current_title", "").lower()
-    current_industry = profile.get("current_industry", "").lower()
-
-    # Score current title against target technical roles
-    title_score = 0.0
-    for target in TARGET_TITLES:
-        if target in current_title:
-            title_score = 1.0
-            break
-
-    is_non_tech = any(t in current_title for t in NON_TECH_TITLES)
-    if is_non_tech:
-        title_score = max(0.0, title_score * 0.1)
-
-    # Walk career history: score historical technical titles + consulting fraction
-    hist_tech_score = 0.0
-    total_months = 0
-    consulting_months = 0
-
-    for job in career_history:
-        job_title = job.get("title", "").lower()
-        company = job.get("company", "").lower()
-        industry = job.get("industry", "").lower()
-        duration = max(0, job.get("duration_months", 0))
-        total_months += duration
-
-        # Technical title check in history
-        for target in TARGET_TITLES:
-            if target in job_title:
-                hist_tech_score = max(hist_tech_score, 0.85)
-                break
-
-        # Consulting detection: prefer industry field, fall back to company name
-        is_consulting = (
-            any(ci in industry for ci in CONSULTING_INDUSTRIES)
-            or any(cn in company for cn in CONSULTING_COMPANY_NAMES)
-        )
-        if is_consulting:
-            consulting_months += duration
-
-    # Also check current company industry (profile-level field)
-    if any(ci in current_industry for ci in CONSULTING_INDUSTRIES):
-        # If current role is consulting, add its implied months
-        if career_history:
-            current_job = next((j for j in career_history if j.get("is_current")), None)
-            if current_job:
-                pass  # already counted above
-            else:
-                # Approximate 12 months if we can't find current job
-                consulting_months += 12
-                total_months += 12
-
-    consulting_fraction = consulting_months / total_months if total_months > 0 else 0.0
-
-    # Blend current title (60%) + historical technical score (40%)
-    final_score = clamp(0.6 * title_score + 0.4 * hist_tech_score)
-    return final_score, is_non_tech, consulting_fraction
-
-
-def score_experience_years(profile: dict) -> float:
-    """
-    Score years of experience. JD sweet spot: 5-9 years.
-    The JD says '5-9 is a range, not a requirement' but the ideal
-    imagined candidate is 6-8 years at product companies.
-    """
-    years = profile.get("years_of_experience", 0)
-
-    if years < 2:
-        return 0.05
-    elif years < 3:
-        return 0.25
-    elif years < 4:
-        return 0.45
-    elif years < 5:
-        return 0.68
-    elif years <= 9:
-        # Peak zone: scale up to 7yr then gently down
-        if years <= 7:
-            return 0.88 + (years - 5) * 0.035   # 0.88 → 0.95
-        else:
-            return 0.95 - (years - 7) * 0.025   # 0.95 → 0.90
-    elif years <= 12:
-        return 0.80 - (years - 9) * 0.04         # 0.80 → 0.68
-    else:
-        return max(0.45, 0.68 - (years - 12) * 0.04)
-
-
-def score_production_vs_research(career_history: list) -> float:
-    """
-    Assess production deployment experience vs. pure research.
-    JD is explicit: 'pure research without production → we will not move forward.'
-
-    Scan career descriptions for production signals (weighted by job duration)
-    vs. research-only signals.
-    """
-    PROD_SIGNALS = [
-        "production", "deployed", "shipped", "launched", "live system",
-        "real users", "at scale", "billion", "million requests", "million users",
-        "latency", "throughput", "serving", "inference server", "inference api",
-        "a/b test", "experiment", "rollout", "canary",
-        "api", "microservice", "pipeline", "platform", "system design",
-        "ranking", "retrieval", "recommendation", "search engine",
-        "embedding service", "vector", "index",
-        "users", "customers", "traffic", "qps", "rps",
-        "fine-tun", "rag", "llm", "model serving",
-        "product company", "startup", "product",
-    ]
-    RESEARCH_ONLY_SIGNALS = [
-        "paper", "publication", "conference paper", "journal", "arxiv",
-        "phd candidate", "academic", "thesis", "dissertation",
-        "pure research", "benchmark only", "research lab", "research-only",
-        "no production", "theoretical",
-    ]
-
-    prod_score = 0.0
-    res_score = 0.0
-
-    for job in career_history:
-        desc = job.get("description", "").lower()
-        duration = max(1, job.get("duration_months", 1))
-
-        prod_hits = sum(1 for kw in PROD_SIGNALS if kw in desc)
-        res_hits = sum(1 for kw in RESEARCH_ONLY_SIGNALS if kw in desc)
-
-        prod_score += prod_hits * duration
-        res_score += res_hits * duration
-
-    total = prod_score + res_score
-    if total == 0:
-        return 0.45  # no description signal — neutral but slightly below midpoint
-
-    return clamp(prod_score / total)
-
-
-def score_behavioral(signals: dict) -> float:
-    """
-    Score behavioral engagement signals from the Redrob platform.
-    10 sub-signals covering availability, engagement, and reliability.
-
-    Key insight from the JD: 'a perfect-on-paper candidate who hasn't
-    logged in for 6 months and has a 5% response rate is, for hiring
-    purposes, not actually available.'
-    """
-    sub_scores = []
-
-    # 1. Open to work (binary — most important availability signal)
-    sub_scores.append(1.0 if signals.get("open_to_work_flag", False) else 0.20)
-
-    # 2. Last active date (recency)
-    last_active_str = signals.get("last_active_date", "")
-    if last_active_str:
-        try:
-            last_active = datetime.strptime(last_active_str, "%Y-%m-%d").date()
-            days_ago = (TODAY - last_active).days
-            if days_ago <= 7:
-                sub_scores.append(1.00)
-            elif days_ago <= 30:
-                sub_scores.append(0.90)
-            elif days_ago <= 90:
-                sub_scores.append(0.70)
-            elif days_ago <= 180:
-                sub_scores.append(0.40)
-            elif days_ago <= 365:
-                sub_scores.append(0.20)
-            else:
-                sub_scores.append(0.05)
-        except ValueError:
-            sub_scores.append(0.50)
-    else:
-        sub_scores.append(0.50)
-
-    # 3. Recruiter response rate (engagement reliability)
-    rr = signals.get("recruiter_response_rate", 0.5)
-    sub_scores.append(clamp(float(rr)))
-
-    # 4. Interview completion rate (no-ghosters)
-    icr = signals.get("interview_completion_rate", 0.5)
-    sub_scores.append(clamp(float(icr)))
-
-    # 5. GitHub activity (important for Senior AI Engineer role)
-    gh = signals.get("github_activity_score", -1)
-    if gh == -1:
-        sub_scores.append(0.20)   # No GitHub linked — mild negative for AI Engineer role
-    else:
-        sub_scores.append(normalize(float(gh), 0, 100))
-
-    # 6. Notice period (JD explicitly wants sub-30 days, can buy out up to 30d)
-    notice = signals.get("notice_period_days", 60)
-    if notice <= 0:
-        sub_scores.append(1.00)
-    elif notice <= 15:
-        sub_scores.append(0.98)
-    elif notice <= 30:
-        sub_scores.append(0.90)
-    elif notice <= 60:
-        sub_scores.append(0.65)
-    elif notice <= 90:
-        sub_scores.append(0.40)
-    elif notice <= 120:
-        sub_scores.append(0.20)
-    else:
-        sub_scores.append(0.08)
-
-    # 7. Profile completeness
-    pc = signals.get("profile_completeness_score", 50)
-    sub_scores.append(normalize(float(pc), 20, 100))
-
-    # 8. Saved by recruiters in last 30 days (social proof — others find them relevant)
-    saved = signals.get("saved_by_recruiters_30d", 0)
-    sub_scores.append(min(1.0, saved / 8.0))
-
-    # 9. Skill assessment scores (taking assessments = shows initiative and transparency)
-    assessments = signals.get("skill_assessment_scores", {})
-    if assessments:
-        avg_assess = sum(assessments.values()) / len(assessments)
-        sub_scores.append(normalize(avg_assess, 30, 90))
-    else:
-        sub_scores.append(0.25)   # No assessments — mild negative
-
-    # 10. Average response time (fast responders are easier to hire)
-    avg_rt = signals.get("avg_response_time_hours", -1)
-    if avg_rt < 0:
-        sub_scores.append(0.50)   # unknown
-    elif avg_rt <= 4:
-        sub_scores.append(1.00)
-    elif avg_rt <= 24:
-        sub_scores.append(0.90)
-    elif avg_rt <= 72:
-        sub_scores.append(0.65)
-    elif avg_rt <= 168:
-        sub_scores.append(0.40)
-    else:
-        sub_scores.append(0.15)
-
-    # Bonus: actively applying (applications_submitted_30d > 0 = in job-search mode)
-    apps = signals.get("applications_submitted_30d", 0)
-    if apps >= 3:
-        sub_scores.append(0.90)
-    elif apps >= 1:
-        sub_scores.append(0.75)
-    else:
-        sub_scores.append(0.40)  # not applying = may not be looking
-
-    # Bonus: verified contact info (reliability signal)
-    verified = signals.get("verified_email", False) and signals.get("verified_phone", False)
-    sub_scores.append(0.90 if verified else 0.45)
-
-    return sum(sub_scores) / len(sub_scores)
-
-
-def score_location(profile: dict, signals: dict) -> float:
-    """Score location fit for Pune/Noida-focused JD."""
-    location = profile.get("location", "").lower()
-    country = profile.get("country", "").lower()
-    willing_to_relocate = signals.get("willing_to_relocate", False)
-
-    is_india = country in ("india", "in") or country == ""
-
-    if not is_india:
-        return 0.45 if willing_to_relocate else 0.20
-
-    for city in PREFERRED_INDIA_LOCATIONS:
-        if city in location:
-            if any(p in location for p in ("pune", "noida", "delhi", "gurgaon", "gurugram", "ncr")):
-                return 1.0
-            return 0.85
-
-    return 0.65 if willing_to_relocate else 0.50
-
-
-def score_education(education: list) -> float:
-    """Score education tier and field relevance."""
-    if not education:
-        return 0.35
-
-    TIER_SCORES = {"tier_1": 1.0, "tier_2": 0.80, "tier_3": 0.60, "tier_4": 0.40, "unknown": 0.50}
-    RELEVANT_FIELDS = {
-        "computer science", "cs", "information technology",
-        "machine learning", "artificial intelligence", "data science",
-        "mathematics", "statistics", "electrical", "electronics",
-        "software engineering", "information systems", "engineering",
-        "computational", "operations research",
-    }
-
-    best = 0.0
-    for edu in education:
-        tier = edu.get("tier", "unknown")
-        field = edu.get("field_of_study", "").lower()
-        t_score = TIER_SCORES.get(tier, 0.50)
-        field_bonus = 0.15 if any(f in field for f in RELEVANT_FIELDS) else 0.0
-        best = max(best, min(1.0, t_score + field_bonus))
-
-    return best
-
-
-def detect_honeypot(candidate: dict) -> bool:
-    """
-    Detect profiles with internally impossible data.
-    ~80 honeypots in the dataset. >10% in top 100 → submission disqualified.
-
-    Four impossibility checks:
-    1. Job duration exceeds time since start date
-    2. Expert proficiency + 0 duration on 3+ skills
-    3. Claimed years of experience > 2.8x career history total
-    4. 20+ skills all marked expert/advanced (keyword stuffer)
+    Four impossibility checks for the ~80 synthetic trap profiles.
+    >10% in top 100 → submission disqualified.
     """
     profile = candidate.get("profile", {})
-    career_history = candidate.get("career_history", [])
+    career = candidate.get("career_history", [])
     skills = candidate.get("skills", [])
 
-    for job in career_history:
+    # 1. Job duration > months since start date (chronologically impossible)
+    for job in career:
         start_str = job.get("start_date", "")
-        stated_duration = job.get("duration_months", 0)
-        if start_str and stated_duration > 0:
+        stated = job.get("duration_months", 0)
+        if start_str and stated > 0:
             try:
                 start = datetime.strptime(start_str, "%Y-%m-%d").date()
-                max_possible = (TODAY.year - start.year) * 12 + (TODAY.month - start.month) + 3
-                if stated_duration > max_possible + 6:
+                max_m = (TODAY.year - start.year) * 12 + (TODAY.month - start.month) + 3
+                if stated > max_m + 6:
                     return True
             except ValueError:
                 pass
 
-    expert_zero = sum(
-        1 for s in skills
-        if s.get("proficiency") == "expert" and s.get("duration_months", 1) == 0
-    )
-    if expert_zero >= 3:
+    # 2. Expert proficiency + 0 duration on 3+ skills
+    if sum(1 for s in skills if s.get("proficiency") == "expert" and s.get("duration_months", 1) == 0) >= 3:
         return True
 
-    claimed_yrs = profile.get("years_of_experience", 0)
-    actual_months = sum(j.get("duration_months", 0) for j in career_history)
-    actual_yrs = actual_months / 12.0
-    if claimed_yrs > 3 and actual_yrs > 0 and claimed_yrs > actual_yrs * 2.8:
+    # 3. Claimed experience >> career history total
+    claimed = profile.get("years_of_experience", 0)
+    actual = sum(j.get("duration_months", 0) for j in career) / 12.0
+    if claimed > 3 and actual > 0 and claimed > actual * 2.8:
         return True
 
-    high_prof_count = sum(1 for s in skills if s.get("proficiency") in ("expert", "advanced"))
-    if high_prof_count >= 20:
+    # 4. 20+ skills all at expert/advanced (keyword stuffer)
+    if sum(1 for s in skills if s.get("proficiency") in ("expert", "advanced")) >= 20:
         return True
 
     return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MASTER SCORING FUNCTION
+# PASS 1: FAST FILTER (100K → 3000)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def compute_score(candidate: dict) -> tuple:
+def fast_score(candidate: dict) -> float:
     """
-    Compute the final weighted score and generate a specific reasoning string.
+    Lightweight score for initial pass. Focuses only on:
+    - Has any Tier1 skill (retrieval/search/ranking/vector)
+    - Has a relevant technical title
+    - Mentions relevant domains in summary/headline
 
-    Component weights (sum = 1.0):
-      Skills match         0.28
-      Title/career fit     0.22
-      Production exp       0.20
-      Years of experience  0.12
-      Behavioral signals   0.10
-      Location fit         0.06
-      Education            0.02
+    Instantly excludes non-technical titles to avoid wasting deep scoring.
+    """
+    profile = candidate.get("profile", {})
+    skills = candidate.get("skills", [])
 
-    Disqualifier multipliers applied after weighted sum.
-    Returns: (score: float [0-1], reasoning: str)
+    title = profile.get("current_title", "").lower()
+
+    # Instant out: clearly non-technical
+    if any(t in title for t in NON_TECH_TITLES):
+        return 0.0
+
+    t1_count = 0
+    t2_count = 0
+    for s in skills:
+        name = s.get("name", "").lower()
+        if any(kw in name or name in kw for kw in TIER1_SKILLS):
+            t1_count += 1
+        elif any(kw in name or name in kw for kw in TIER2_SKILLS):
+            t2_count += 1
+
+    title_hit = any(t in title for t in STRONG_TITLE_SCORES)
+
+    text = (profile.get("headline", "") + " " + profile.get("summary", "")).lower()
+    text_hit = any(kw in text for kw in [
+        "retrieval", "recommendation", "ranking", "search", "vector",
+        "embedding", "nlp", "information retrieval", "rag", "ndcg",
+    ])
+
+    score = t1_count * 2.5 + t2_count * 0.5
+    if title_hit:
+        score += 4.0
+    if text_hit:
+        score += 1.0
+    return score
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT SCORERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def score_skill_fit(skills: list, extra_text: str = "") -> tuple:
+    """
+    Tiered skill scoring (35% of final score).
+    Tier 1 (retrieval/search/ranking): highest weight
+    Tier 2 (NLP, MLOps, engineering): medium weight
+    Tier 3 (trendy LLM tooling): low weight — JD warns against this
+    Disqualifying (CV/Speech/Robotics): penalty applied
+    """
+    t1_w = t2_w = t3_w = disq_w = total_w = 0.0
+
+    for skill in skills:
+        name = skill.get("name", "").lower()
+        prof = PROFICIENCY_WEIGHTS.get(skill.get("proficiency", "beginner"), 0.15)
+        endorse = min(skill.get("endorsements", 0), 100)
+        duration = min(skill.get("duration_months", 0), 72)
+        weight = prof * (1 + endorse / 200.0 + duration / 144.0)
+        total_w += weight
+
+        if any(kw in name or name in kw for kw in TIER1_SKILLS):
+            t1_w += weight
+        elif any(kw in name or name in kw for kw in TIER2_SKILLS):
+            t2_w += weight
+        elif any(kw in name or name in kw for kw in TIER3_SKILLS):
+            t3_w += weight
+        if any(kw in name or name in kw for kw in DISQUALIFYING_SKILLS):
+            disq_w += weight
+
+    # Scan summary + headline for JD concept areas (catches Tier-5 plain-language candidates)
+    text_bonus = 0.0
+    if extra_text:
+        text_l = extra_text.lower()
+        checks = [
+            any(kw in text_l for kw in ["retrieval", "semantic search", "dense retrieval", "information retrieval"]),
+            any(kw in text_l for kw in ["vector", "faiss", "pinecone", "qdrant", "elasticsearch", "opensearch"]),
+            any(kw in text_l for kw in ["ranking", "recommendation", "recommender", "learning to rank"]),
+            any(kw in text_l for kw in ["search engine", "search system", "search platform"]),
+            any(kw in text_l for kw in ["a/b test", "ndcg", "mrr", "offline eval", "evaluation framework"]),
+            any(kw in text_l for kw in ["embedding", "sentence-transformer", "bi-encoder"]),
+        ]
+        text_bonus = sum(checks) / len(checks) * 0.30
+
+    tw = total_w if total_w > 0 else 1.0
+    t1_norm = clamp(t1_w / tw)
+    t2_norm = clamp(t2_w / tw * 0.55)
+    t3_norm = clamp(t3_w / tw * 0.15)  # LLM-only tooling gets very little weight
+    disq_frac = clamp(disq_w / tw)
+
+    raw = clamp(t1_norm * 0.65 + t2_norm * 0.25 + t3_norm * 0.10 + text_bonus)
+
+    # Domain disqualification
+    if disq_frac > 0.60:
+        raw *= 0.25
+    elif disq_frac > 0.40:
+        raw *= 0.58
+
+    return clamp(raw), disq_frac
+
+
+def score_product_fit(profile: dict, career: list) -> tuple:
+    """
+    Assess fit as a product-company ML engineer who ships systems (25% of final).
+
+    Components:
+    - Title alignment (search/ranking/applied ML > generic DS/research)
+    - Consulting fraction (IT services career = penalty)
+    - Production shipping evidence in career descriptions
+    - Startup/product company environment
+
+    Returns (product_fit_score, consulting_fraction, production_ratio)
+    """
+    SHIP_SIGNALS = [
+        "production", "shipped", "launched", "deployed", "live system",
+        "real users", "at scale", "million", "billion",
+        "latency", "throughput", "serving", "inference", "qps", "rps",
+        "a/b test", "experiment", "rollout",
+        "ranking system", "retrieval system", "recommendation engine",
+        "search engine", "embedding service", "vector index", "reranker",
+        "search platform", "recommendation platform",
+    ]
+    RESEARCH_SIGNALS = [
+        "paper", "publication", "conference", "arxiv", "journal",
+        "thesis", "academic", "phd candidate", "research lab",
+        "pure research", "benchmark", "theoretical", "no production",
+    ]
+
+    title = profile.get("current_title", "").lower()
+    company_size = profile.get("current_company_size", "")
+
+    # Title score with seniority modifiers
+    title_score = 0.0
+    for t, score in STRONG_TITLE_SCORES.items():
+        if t in title:
+            title_score = max(title_score, score)
+
+    if any(p in title for p in ("lead", "principal", "staff", "head of", "director")):
+        title_score = min(1.0, title_score + 0.12)
+    elif any(p in title for p in ("senior", "sr.")):
+        title_score = min(1.0, title_score + 0.06)
+    elif any(p in title for p in ("junior", "jr.", "associate", "intern", "trainee")):
+        title_score = max(0.0, title_score - 0.22)
+
+    # Career analysis
+    total_months = 0
+    consulting_months = 0
+    ship_score = 0.0
+    research_score = 0.0
+
+    for job in career:
+        industry = job.get("industry", "").lower()
+        company = job.get("company", "").lower()
+        j_size = job.get("company_size", "")
+        desc = job.get("description", "").lower()
+        duration = max(1, job.get("duration_months", 1))
+        total_months += duration
+
+        is_consulting = (
+            any(ci in industry for ci in CONSULTING_INDUSTRIES)
+            or any(cn in company for cn in CONSULTING_NAMES)
+        )
+        if is_consulting:
+            consulting_months += duration
+
+        # Startup/product company size boosts shipping signal
+        size_mult = 1.25 if j_size in ("1-10", "11-50", "51-200") else (1.1 if j_size in ("201-500", "501-1000") else 1.0)
+
+        ship_hits = sum(1 for kw in SHIP_SIGNALS if kw in desc)
+        research_hits = sum(1 for kw in RESEARCH_SIGNALS if kw in desc)
+        ship_score += ship_hits * duration * size_mult
+        research_score += research_hits * duration
+
+    consult_frac = consulting_months / total_months if total_months > 0 else 0.0
+    total_signal = ship_score + research_score
+    prod_ratio = ship_score / total_signal if total_signal > 0 else 0.40
+
+    # Consulting penalty
+    if consult_frac >= 0.95:
+        consult_mult = 0.08
+    elif consult_frac >= 0.80:
+        consult_mult = 0.22
+    elif consult_frac >= 0.65:
+        consult_mult = 0.42
+    elif consult_frac >= 0.50:
+        consult_mult = 0.68
+    else:
+        consult_mult = 1.0
+
+    raw = (0.40 * title_score + 0.60 * prod_ratio) * consult_mult
+    return clamp(raw), consult_frac, prod_ratio
+
+
+def score_behavioral(signals: dict) -> float:
+    """
+    12 platform engagement sub-signals (20% of final).
+    Availability and engagement are as important as skills on paper.
+    """
+    sub = []
+
+    # 1. Open to work (critical — not open = may not engage)
+    sub.append(1.0 if signals.get("open_to_work_flag", False) else 0.15)
+
+    # 2. Recruiter response rate
+    rr = clamp(signals.get("recruiter_response_rate", 0.5))
+    if rr >= 0.80:
+        sub.append(1.00)
+    elif rr >= 0.50:
+        sub.append(0.75)
+    elif rr >= 0.30:
+        sub.append(0.48)
+    elif rr >= 0.20:
+        sub.append(0.25)
+    else:
+        sub.append(0.08)  # <20% = hard to reach
+
+    # 3. Last active date
+    last_str = signals.get("last_active_date", "")
+    if last_str:
+        try:
+            days = (TODAY - datetime.strptime(last_str, "%Y-%m-%d").date()).days
+            if days <= 7:
+                sub.append(1.00)
+            elif days <= 30:
+                sub.append(0.90)
+            elif days <= 60:
+                sub.append(0.68)
+            elif days <= 90:
+                sub.append(0.42)
+            elif days <= 180:
+                sub.append(0.18)
+            else:
+                sub.append(0.04)
+        except ValueError:
+            sub.append(0.50)
+    else:
+        sub.append(0.50)
+
+    # 4. Interview completion rate (no ghosters)
+    sub.append(clamp(signals.get("interview_completion_rate", 0.5)))
+
+    # 5. GitHub activity (important for AI Engineer role)
+    gh = signals.get("github_activity_score", -1)
+    if gh == -1:
+        sub.append(0.18)
+    elif gh >= 60:
+        sub.append(1.00)
+    elif gh >= 30:
+        sub.append(0.65)
+    elif gh > 0:
+        sub.append(0.35)
+    else:
+        sub.append(0.08)
+
+    # 6. Saved by recruiters in last 30d (social proof)
+    sub.append(clamp(signals.get("saved_by_recruiters_30d", 0) / 8.0))
+
+    # 7. Profile completeness
+    sub.append(clamp((float(signals.get("profile_completeness_score", 50)) - 20) / 80))
+
+    # 8. Skill assessment scores
+    assessments = signals.get("skill_assessment_scores", {})
+    if assessments:
+        avg = sum(assessments.values()) / len(assessments)
+        sub.append(clamp((avg - 30) / 60))
+    else:
+        sub.append(0.18)
+
+    # 9. Average response time (fast responders easier to hire)
+    avg_rt = signals.get("avg_response_time_hours", -1)
+    if avg_rt < 0:
+        sub.append(0.50)
+    elif avg_rt <= 24:
+        sub.append(1.00)
+    elif avg_rt <= 72:
+        sub.append(0.68)
+    elif avg_rt <= 168:
+        sub.append(0.35)
+    else:
+        sub.append(0.10)
+
+    # 10. Applications submitted (actively looking)
+    apps = signals.get("applications_submitted_30d", 0)
+    sub.append(1.0 if apps >= 3 else 0.72 if apps >= 1 else 0.28)
+
+    # 11. Verified contacts (reliability)
+    verified = signals.get("verified_email", False) and signals.get("verified_phone", False)
+    sub.append(0.90 if verified else 0.38)
+
+    # 12. LinkedIn connected
+    sub.append(0.78 if signals.get("linkedin_connected", False) else 0.38)
+
+    return sum(sub) / len(sub)
+
+
+def score_experience_fit(profile: dict) -> float:
+    """
+    Years of experience with seniority-level modifier (10% of final).
+    JD ideal: 6-8 years. Title seniority adjusts the base score.
+    Junior ML Engineer at rank 6 is a known issue — fix it here.
+    """
+    years = profile.get("years_of_experience", 0)
+    title = profile.get("current_title", "").lower()
+
+    if years < 2:
+        base = 0.05
+    elif years < 3:
+        base = 0.20
+    elif years < 4:
+        base = 0.38
+    elif years < 5:
+        base = 0.58
+    elif years < 6:
+        base = 0.78
+    elif years <= 8:
+        base = 0.95   # ideal
+    elif years <= 9:
+        base = 0.88
+    elif years <= 11:
+        base = 0.75
+    elif years <= 14:
+        base = 0.62
+    else:
+        base = max(0.42, 0.62 - (years - 14) * 0.04)
+
+    # Seniority modifier from title
+    modifier = 0.0
+    if any(p in title for p in ("lead", "principal", "staff", "head of", "director")):
+        modifier = +0.12
+    elif any(p in title for p in ("senior", "sr.")):
+        modifier = +0.06
+    elif any(p in title for p in ("junior", "jr.", "associate", "intern", "trainee")):
+        modifier = -0.22   # strong downgrade — Junior is a hard disqualifier signal
+
+    return clamp(base + modifier)
+
+
+def score_location_notice(profile: dict, signals: dict) -> float:
+    """Combined location fit + notice period (10% of final)."""
+    location = profile.get("location", "").lower()
+    country = profile.get("country", "").lower()
+    willing = signals.get("willing_to_relocate", False)
+    notice = signals.get("notice_period_days", 60)
+
+    # Location
+    is_india = country in ("india", "in") or country == ""
+    if not is_india:
+        loc_score = 0.50 if willing else 0.18
+    else:
+        is_preferred = any(city in location for city in PREFERRED_LOCATIONS)
+        is_top_pref = is_preferred and any(p in location for p in (
+            "pune", "noida", "delhi", "gurgaon", "gurugram", "ncr",
+            "bangalore", "bengaluru", "hyderabad", "mumbai"
+        ))
+        if is_top_pref:
+            loc_score = 1.0
+        elif is_preferred:
+            loc_score = 0.85
+        else:
+            loc_score = 0.65 if willing else 0.45
+
+    # Notice period (JD wants sub-30, can buy-out up to 30)
+    if notice <= 0:
+        notice_score = 1.00
+    elif notice <= 30:
+        notice_score = 0.95
+    elif notice <= 45:
+        notice_score = 0.72
+    elif notice <= 60:
+        notice_score = 0.55
+    elif notice <= 90:
+        notice_score = 0.32
+    elif notice <= 120:
+        notice_score = 0.15
+    else:
+        notice_score = 0.04
+
+    return clamp(0.55 * loc_score + 0.45 * notice_score)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HARD PENALTIES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def compute_hard_penalties(profile: dict, career: list, skills: list, signals: dict) -> float:
+    """
+    Penalty value (0 to 0.50) subtracted from final score.
+    These catch the specific JD disqualifiers that weighted scoring alone misses.
+    """
+    penalty = 0.0
+    title = profile.get("current_title", "").lower()
+
+    # Non-technical title
+    if any(t in title for t in NON_TECH_TITLES):
+        penalty += 0.35
+
+    # Junior title (JD needs 5-9yr, senior judgment)
+    if any(p in title for p in ("junior", "jr.", "intern", "trainee")) and "senior" not in title:
+        penalty += 0.15
+
+    # Inactive > 90 days (effectively unavailable for hiring purposes)
+    last_str = signals.get("last_active_date", "")
+    if last_str:
+        try:
+            days = (TODAY - datetime.strptime(last_str, "%Y-%m-%d").date()).days
+            if days > 180:
+                penalty += 0.18
+            elif days > 90:
+                penalty += 0.09
+        except ValueError:
+            pass
+
+    # Very low recruiter response rate (<20% = nearly unreachable)
+    rr = float(signals.get("recruiter_response_rate", 0.5))
+    if rr < 0.10:
+        penalty += 0.15
+    elif rr < 0.20:
+        penalty += 0.08
+
+    # Research-heavy career without production signal
+    if career:
+        research_heavy = sum(
+            1 for job in career
+            if sum(1 for kw in ["paper", "publication", "thesis", "arxiv", "academic"]
+                   if kw in job.get("description", "").lower()) >= 2
+        ) >= len(career) * 0.60
+        if research_heavy:
+            penalty += 0.18
+
+    # Only trendy LLM tooling with NO retrieval/search skills
+    # A candidate who only knows LangChain + OpenAI + Prompt Engineering should not rank high
+    skill_names_text = " ".join(s.get("name", "").lower() for s in skills)
+    has_tier1 = any(any(t in sn or sn in t for t in TIER1_SKILLS)
+                    for sn in (s.get("name", "").lower() for s in skills))
+    llm_hype_only = (
+        not has_tier1
+        and any(kw in skill_names_text for kw in ["langchain", "prompt engineering", "openai", "chatgpt"])
+    )
+    if llm_hype_only:
+        penalty += 0.14
+
+    # Not open to work
+    if not signals.get("open_to_work_flag", False):
+        penalty += 0.04
+
+    return clamp(penalty, 0.0, 0.52)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MASTER DEEP SCORER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def deep_score(candidate: dict) -> tuple:
+    """
+    Full 5-component scoring + hard penalties.
+    Only called on pre-filtered top ~3000 candidates.
+    Returns (score: float, reasoning: str)
     """
     profile = candidate.get("profile", {})
     career = candidate.get("career_history", [])
     skills = candidate.get("skills", [])
-    education = candidate.get("education", [])
     signals = candidate.get("redrob_signals", {})
 
-    # ── Honeypot guard ───────────────────────────────────────────────────────
-    if detect_honeypot(candidate):
-        return 0.0, "Profile flagged as honeypot: internally inconsistent data (impossible tenure or inflated experience)."
+    if is_honeypot(candidate):
+        return 0.0, "Flagged as honeypot: internally inconsistent data (impossible tenure, inflated experience, or expert/zero-duration skills)."
 
-    # ── Build extra text for skills scorer (summary + headline) ─────────────
-    summary = profile.get("summary", "")
-    headline = profile.get("headline", "")
-    extra_text = f"{headline} {summary}"
+    extra_text = profile.get("headline", "") + " " + profile.get("summary", "")
 
-    # ── Component scores ─────────────────────────────────────────────────────
-    ai_skill_score, disq_frac = score_skills(skills, extra_text)
-    title_score, is_non_tech, consult_frac = score_title_fit(profile, career)
-    prod_score = score_production_vs_research(career)
-    exp_score = score_experience_years(profile)
-    behavioral_score = score_behavioral(signals)
-    location_score = score_location(profile, signals)
-    edu_score = score_education(education)
-
-    # ── Disqualifier penalty multipliers ────────────────────────────────────
-    penalty = 1.0
-
-    # Consulting-only career — JD explicitly disqualifies this
-    if consult_frac >= 0.95:
-        penalty *= 0.12    # Entire career at IT services
-    elif consult_frac >= 0.80:
-        penalty *= 0.28
-    elif consult_frac >= 0.65:
-        penalty *= 0.50
-    elif consult_frac >= 0.50:
-        penalty *= 0.72
-
-    # Non-technical title throughout career
-    if is_non_tech and title_score < 0.15:
-        penalty *= 0.18
-
-    # CV/Speech/Robotics primary focus — wrong domain
-    if disq_frac > 0.65:
-        penalty *= 0.22
-    elif disq_frac > 0.45:
-        penalty *= 0.52
-
-    # Pure researcher with no production signal
-    if prod_score < 0.10 and ai_skill_score < 0.15:
-        penalty *= 0.38
-
-    # ── Weighted sum ─────────────────────────────────────────────────────────
-    # Company size bonus: small startups (1-50) are product-company signal
-    company_size = profile.get("current_company_size", "")
-    startup_bonus = 1.05 if company_size in ("1-10", "11-50", "51-200") else 1.0
+    skill_fit, disq_frac = score_skill_fit(skills, extra_text)
+    product_fit, consult_frac, prod_ratio = score_product_fit(profile, career)
+    behavioral = score_behavioral(signals)
+    exp_fit = score_experience_fit(profile)
+    loc_notice = score_location_notice(profile, signals)
+    penalties = compute_hard_penalties(profile, career, skills, signals)
 
     raw = (
-        0.26 * ai_skill_score
-        + 0.22 * title_score
-        + 0.20 * prod_score
-        + 0.12 * exp_score
-        + 0.10 * behavioral_score
-        + 0.06 * location_score
-        + 0.04 * edu_score
-    ) * startup_bonus
+        0.35 * skill_fit
+        + 0.25 * product_fit
+        + 0.20 * behavioral
+        + 0.10 * exp_fit
+        + 0.10 * loc_notice
+    )
+    final = clamp(raw - penalties)
 
-    final_score = clamp(raw * penalty)
-
-    # ── Reasoning (specific facts, JD-connected, honest about concerns) ──────
+    # ─── JD-Specific Reasoning (Stage 4 checks this carefully) ────────────────
     years = profile.get("years_of_experience", 0)
     curr_title = profile.get("current_title", "N/A")
     curr_company = profile.get("current_company", "")
     location = profile.get("location", "N/A")
     country = profile.get("country", "")
     notice = signals.get("notice_period_days", 0)
-    rr = signals.get("recruiter_response_rate", 0)
-    otw = signals.get("open_to_work_flag", False)
+    rr = float(signals.get("recruiter_response_rate", 0))
     gh = signals.get("github_activity_score", -1)
-    last_active_str = signals.get("last_active_date", "")
+    last_str = signals.get("last_active_date", "")
 
-    # Pick the top relevant skill names from skills list
-    rel_skills = [
+    loc_str = f"{location}, {country}" if country and country.lower() not in ("india", "in", "") else location
+
+    # Find Tier1 skill hits (most JD-relevant)
+    tier1_hits = [
         s.get("name", "") for s in skills
-        if any(kw in s.get("name", "").lower() or s.get("name", "").lower() in kw
-               for kw in REQUIRED_SKILLS)
+        if any(kw in s.get("name", "").lower() or s.get("name", "").lower() in kw for kw in TIER1_SKILLS)
     ]
-    top_skills_str = ", ".join(rel_skills[:3]) if rel_skills else "general engineering"
 
-    # Location string
-    loc_str = location
-    if country and country.lower() not in ("india", "in", ""):
-        loc_str = f"{location}, {country}"
+    # Find career evidence of retrieval/ranking/recommendation systems
+    system_evidence = None
+    for job in career[:3]:
+        desc = job.get("description", "").lower()
+        if any(kw in desc for kw in ["retrieval", "search", "recommendation", "ranking", "vector", "embedding", "rerank"]):
+            j_title = job.get("title", "")
+            j_company = job.get("company", "")
+            system_evidence = f"built {j_title}-level retrieval/search systems at {j_company}"
+            break
 
-    # Collect strengths
-    strengths = []
-    if ai_skill_score >= 0.50:
-        strengths.append("strong AI/ML skill match")
-    if prod_score >= 0.65:
-        strengths.append("clear production deployment evidence")
-    if title_score >= 0.60:
-        strengths.append("relevant technical title")
-    if gh >= 40:
-        strengths.append(f"active GitHub (score {gh:.0f})")
-    if otw:
-        strengths.append("actively open to work")
-    if notice <= 30:
-        strengths.append(f"{notice}d notice")
+    # Days inactive
+    days_inactive = None
+    if last_str:
+        try:
+            days_inactive = (TODAY - datetime.strptime(last_str, "%Y-%m-%d").date()).days
+        except ValueError:
+            pass
 
-    # Collect concerns (be honest — Stage 4 checks for this)
+    # Specific concerns to surface honestly
     concerns = []
     if consult_frac > 0.65:
         concerns.append(f"consulting-heavy career ({consult_frac:.0%} in IT services)")
-    if is_non_tech:
-        concerns.append("non-technical current title")
-    if disq_frac > 0.40:
-        concerns.append("CV/Speech/Robotics focus vs NLP/IR required")
     if notice > 60:
         concerns.append(f"{notice}d notice period")
-    if not otw:
+    if not signals.get("open_to_work_flag", False):
         concerns.append("not marked open-to-work")
-    if last_active_str:
-        try:
-            la = datetime.strptime(last_active_str, "%Y-%m-%d").date()
-            days_ago = (TODAY - la).days
-            if days_ago > 90:
-                concerns.append(f"inactive {days_ago}d")
-        except ValueError:
-            pass
+    if days_inactive and days_inactive > 90:
+        concerns.append(f"inactive {days_inactive}d on platform")
     if rr < 0.25:
-        concerns.append(f"low recruiter response rate ({rr:.0%})")
+        concerns.append(f"{rr:.0%} recruiter response rate")
+    if prod_ratio < 0.30:
+        concerns.append("limited production deployment evidence in career descriptions")
 
-    # Assemble reasoning (specific, factual, not templated)
-    company_str = f" at {curr_company}" if curr_company else ""
-    parts = [f"{curr_title}{company_str}, {years:.1f}yr exp, {loc_str}."]
-    parts.append(f"Key skills: {top_skills_str}.")
-    if strengths:
-        parts.append(f"Strengths: {'; '.join(strengths[:2])}.")
+    # Build specific, non-templated reasoning sentence
+    intro = f"{curr_title} at {curr_company}" if curr_company else curr_title
+    parts = [f"{intro} ({years:.1f}yr, {loc_str})."]
+
+    # Lead with specific domain evidence (not generic "AI/ML skills")
+    if system_evidence:
+        if tier1_hits:
+            parts.append(f"{system_evidence}; key skills: {', '.join(tier1_hits[:2])}.")
+        else:
+            parts.append(f"{system_evidence}.")
+    elif tier1_hits:
+        parts.append(f"Skills directly matching JD: {', '.join(tier1_hits[:3])}.")
+    else:
+        parts.append("No direct retrieval/ranking/vector-DB evidence in profile.")
+
     if concerns:
         parts.append(f"Concerns: {'; '.join(concerns[:2])}.")
+    else:
+        parts.append("No major concerns.")
+
     parts.append(f"Response rate {rr:.0%}, notice {notice}d.")
 
     reasoning = " ".join(parts)
-    if len(reasoning) > 400:
-        reasoning = reasoning[:397] + "..."
-
-    return final_score, reasoning
+    if len(reasoning) > 420:
+        reasoning = reasoning[:417] + "..."
+    return final, reasoning
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RANKING PIPELINE
+# TWO-PASS RANKING PIPELINE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def rank_candidates(input_path: str, output_path: str):
-    """Stream candidates from JSONL, score all, output top-100 CSV."""
+    """
+    Two-pass pipeline for 100K candidates within CPU + 5-min budget:
+      Pass 1: Fast filter all 100K → keep top 3000 by lightweight score
+      Pass 2: Deep 5-component scoring on top 3000 → select top 100
+    """
     path = Path(input_path)
     if not path.exists():
         print(f"ERROR: File not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[Bug Hunters Ranker] Input : {input_path}")
-    print(f"[Bug Hunters Ranker] Output: {output_path}")
-    print("[Bug Hunters Ranker] Scoring candidates...")
+    print(f"[Bug Hunters v2] Input : {input_path}")
+    print(f"[Bug Hunters v2] Output: {output_path}")
 
-    import gzip
-    if path.suffix == ".gz":
-        opener = lambda: gzip.open(path, "rt", encoding="utf-8")
-    else:
-        opener = lambda: open(path, "r", encoding="utf-8")
-
-    all_scores = []
-    count = 0
+    opener = (lambda: gzip.open(path, "rt", encoding="utf-8")) if path.suffix == ".gz" \
+        else (lambda: open(path, "r", encoding="utf-8"))
 
     with opener() as f:
-        raw = f.read()
+        raw_content = f.read()
+    raw_content = raw_content.strip()
+    is_array = raw_content.startswith("[")
 
-    raw = raw.strip()
-    if raw.startswith("["):
-        # JSON array (e.g. sample_candidates.json)
-        try:
-            candidates_list = json.loads(raw)
-        except json.JSONDecodeError as e:
-            print(f"ERROR: Could not parse JSON array: {e}", file=sys.stderr)
-            sys.exit(1)
-        for c in candidates_list:
-            cid = c.get("candidate_id", "")
-            if not cid:
-                continue
-            score, reasoning = compute_score(c)
-            all_scores.append((cid, score, reasoning))
-            count += 1
-    else:
-        # JSONL — process line by line (memory efficient for 100K candidates)
-        with opener() as f:
-            for line in f:
+    def iter_candidates(content, as_array):
+        if as_array:
+            for c in json.loads(content):
+                yield c
+        else:
+            for line in content.splitlines():
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    c = json.loads(line)
+                    yield json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                cid = c.get("candidate_id", "")
-                if not cid:
-                    continue
-                score, reasoning = compute_score(c)
-                all_scores.append((cid, score, reasoning))
-                count += 1
-                if count % 10_000 == 0:
-                    print(f"  ...scored {count:,} candidates", flush=True)
 
-    print(f"[Bug Hunters Ranker] Scored {count:,} total.")
+    # ── Pass 1: Fast filter ───────────────────────────────────────────────────
+    print("[Bug Hunters v2] Pass 1: Fast filtering 100K candidates...")
+    fast_pool = []
+    total = 0
 
-    # Sort: descending score, ascending candidate_id for tie-breaks (spec requirement)
-    all_scores.sort(key=lambda x: (-x[1], x[0]))
-    top_100 = all_scores[:100]
+    for c in iter_candidates(raw_content, is_array):
+        cid = c.get("candidate_id", "")
+        if not cid:
+            continue
+        fs = fast_score(c)
+        fast_pool.append((fs, cid, c))
+        total += 1
+        if total % 10_000 == 0:
+            print(f"  Pass 1: {total:,} scanned...", flush=True)
 
-    # Write CSV
+    print(f"[Bug Hunters v2] Pass 1 complete: {total:,} scanned.")
+    fast_pool.sort(key=lambda x: -x[0])
+    pool = fast_pool[:3000]
+    print(f"[Bug Hunters v2] Pass 2: Deep scoring top {len(pool)} candidates...")
+
+    # ── Pass 2: Deep scoring ──────────────────────────────────────────────────
+    deep_results = []
+    for i, (_, cid, c) in enumerate(pool):
+        score, reasoning = deep_score(c)
+        deep_results.append((cid, score, reasoning))
+        if (i + 1) % 500 == 0:
+            print(f"  Pass 2: {i+1}/{len(pool)} scored...", flush=True)
+
+    print(f"[Bug Hunters v2] Pass 2 complete.")
+
+    # Sort: descending score, ascending candidate_id for tie-breaks (spec §3)
+    deep_results.sort(key=lambda x: (-x[1], x[0]))
+    top_100 = deep_results[:100]
+
+    # ── Write CSV ─────────────────────────────────────────────────────────────
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", newline="", encoding="utf-8") as f:
@@ -832,30 +860,27 @@ def rank_candidates(input_path: str, output_path: str):
         for rank, (cid, score, reasoning) in enumerate(top_100, start=1):
             writer.writerow([cid, rank, f"{score:.6f}", reasoning])
 
-    print(f"\n[Bug Hunters Ranker] Written: {out_path}")
+    print(f"\n[Bug Hunters v2] Written: {out_path}")
     print("\nTop 10:")
     print(f"{'Rank':>4}  {'Candidate':14}  {'Score':>7}  Reasoning (preview)")
-    print("-" * 90)
+    print("-" * 100)
     for rank, (cid, score, reasoning) in enumerate(top_100[:10], start=1):
-        print(f"{rank:>4}  {cid:14}  {score:>7.4f}  {reasoning[:60]}...")
+        print(f"{rank:>4}  {cid:14}  {score:>7.4f}  {reasoning[:65]}...")
     if top_100:
         print(f"\nScore range: [{top_100[-1][1]:.4f} – {top_100[0][1]:.4f}]")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Bug Hunters — Redrob Hackathon Candidate Ranker\n"
-                    "Produces top-100 submission CSV for the Senior AI Engineer JD.",
+        description="Bug Hunters — Redrob Hackathon Ranker v2\n"
+                    "Two-pass pipeline: 100K → fast filter → 3K → deep score → 100",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--candidates", required=True,
-                        help="Path to candidates.jsonl or candidates.jsonl.gz")
-    parser.add_argument("--out", required=True,
-                        help="Output path for submission CSV")
+    parser.add_argument("--candidates", required=True, help="Path to candidates.jsonl or .jsonl.gz")
+    parser.add_argument("--out", required=True, help="Output CSV path (e.g. bug_hunters.csv)")
     args = parser.parse_args()
     rank_candidates(args.candidates, args.out)
 
 
 if __name__ == "__main__":
     main()
-
