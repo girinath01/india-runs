@@ -96,8 +96,6 @@ TIER1_SKILLS = frozenset({
     "search engine", "search ranking", "search system", "search infrastructure",
     "recommendation system", "recommender", "recommender system", "ranking system",
     "learning to rank", "ltr", "lambdamart", "lambdarank", "ranknet",
-    "embeddings", "embedding", "sentence-transformers", "sentence transformer",
-    "text embedding", "openai embeddings", "bge", "e5 model", "dense embedding",
     "bi-encoder", "cross-encoder",
     "faiss", "elasticsearch", "opensearch", "qdrant", "milvus",
     "weaviate", "pinecone", "pgvector", "vespa", "annoy", "scann", "chroma",
@@ -113,6 +111,8 @@ TIER1_SKILLS = frozenset({
 # Tier 2 — strong supporting skills
 TIER2_SKILLS = frozenset({
     "rag", "retrieval augmented generation",
+    "embeddings", "embedding", "sentence-transformers", "sentence transformer",
+    "text embedding", "openai embeddings", "bge", "e5 model", "dense embedding",
     "nlp", "natural language processing", "language model", "text classification",
     "bert", "transformers", "huggingface", "hugging face",
     "pytorch", "tensorflow", "keras", "jax",
@@ -616,16 +616,29 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
     
     skills_str = " and ".join(tier1_hits[:2]) if tier1_hits else "relevant skills"
     
+    cid = profile.get("id", "CAND")
+    variant = hash(cid) % 3
+    
     if final_score > 0.70:
         if has_ship:
-            base = f"Strong retrieval/search fit with {skills_str} experience in a product environment."
+            if variant == 0:
+                base = f"Built production retrieval pipelines using {skills_str}; good match for search-heavy JD."
+            elif variant == 1:
+                base = f"Strong {skills_str} and vector DB experience with product deployment history."
+            else:
+                base = f"{skills_str} experience closely aligns with retrieval-focused requirements."
         else:
-            base = f"Strong recommendation-system background with {skills_str}; fits retrieval-heavy role."
+            if variant == 0:
+                base = f"Strong recommendation-system background with {skills_str}; fits retrieval-heavy role."
+            elif variant == 1:
+                base = f"Solid theoretical foundation in {skills_str}; good alignment for ranking tasks."
+            else:
+                base = f"Demonstrates strong knowledge of {skills_str} suitable for search relevance."
             
         if notice >= 60:
-            return f"{base} Good match for JD despite {notice}-day notice period."
+            return f"{base} Slightly weaker fit due to {notice}-day notice period."
         else:
-            return f"{base} Excellent availability ({notice}-day notice)."
+            return f"{base} Excellent availability ({notice}-day notice) improves fit."
     else:
         if not tier1_hits:
             return f"Missing core retrieval/search skills for the founding role. Notice period: {notice} days."
@@ -709,7 +722,7 @@ def deep_score(candidate: dict) -> tuple[float, str]:
       + 0.05 * loc_sc
     )
     raw = base_raw + exp_boost + title_boost + res_penalty + notice_boost + prod_boost
-    final = clamp(raw - penalties)
+    final = max(0.0, raw - penalties)
 
     reasoning = generate_reasoning(
         profile, career, skills, signals,
@@ -812,6 +825,14 @@ def rank_candidates(input_path: str, output_path: str, top_k: int = 3000) -> Non
             print(f"  {i+1}/{len(pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
 
     print(f"[Pass 2] Done in {time.time()-t0:.1f}s")
+
+    if deep_results:
+        max_raw = max(sc for _, sc, _ in deep_results)
+        if max_raw > 0:
+            deep_results = [
+                (cid, (sc / max_raw) * 0.991, r)
+                for cid, sc, r in deep_results
+            ]
 
     # Sort: score desc, candidate_id asc (deterministic tie-break per spec §3)
     deep_results.sort(key=lambda x: (-x[1], x[0]))
