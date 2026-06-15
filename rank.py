@@ -103,7 +103,6 @@ TIER1_SKILLS = frozenset({
     "weaviate", "pinecone", "pgvector", "vespa", "annoy", "scann", "chroma",
     "vector database", "vector db", "vector store", "vector index",
     "ann", "approximate nearest neighbor", "hnsw",
-    "rag", "retrieval augmented generation",
     "reranking", "re-ranking", "reranker", "colbert",
     "bm25", "tfidf", "tf-idf",
     "ndcg", "mrr", "mean reciprocal rank", "map", "mean average precision",
@@ -113,6 +112,7 @@ TIER1_SKILLS = frozenset({
 
 # Tier 2 — strong supporting skills
 TIER2_SKILLS = frozenset({
+    "rag", "retrieval augmented generation",
     "nlp", "natural language processing", "language model", "text classification",
     "bert", "transformers", "huggingface", "hugging face",
     "pytorch", "tensorflow", "keras", "jax",
@@ -509,27 +509,13 @@ def score_behavioral(signals: dict, notice: int) -> float:
 
 
 def score_experience_fit(profile: dict) -> float:
-    """Years of experience fit  (weight: 0.10 of final). JD ideal: 6-8 yrs."""
+    """Requested absolute additive modifiers for experience."""
     years = float(profile.get("years_of_experience", 0) or 0)
-    title = profile.get("current_title", "").lower()
-
-    if   years < 2:   base = 0.05
-    elif years < 3:   base = 0.20
-    elif years < 4:   base = 0.38
-    elif years < 5:   base = 0.58
-    elif years < 6:   base = 0.78
-    elif years <= 8:  base = 0.95   # sweet spot
-    elif years <= 9:  base = 0.88
-    elif years <= 11: base = 0.75
-    elif years <= 14: base = 0.62
-    else:             base = max(0.42, 0.62 - (years - 14) * 0.04)
-
-    if   any(p in title for p in ("lead", "principal", "staff", "head of", "director")): mod = +0.12
-    elif any(p in title for p in ("senior", "sr.")):                                      mod = +0.06
-    elif any(p in title for p in ("junior", "jr.", "associate", "intern", "trainee")):    mod = -0.22
-    else:                                                                                  mod = 0.0
-
-    return clamp(base + mod)
+    if years < 3.5:   return -0.10
+    elif years < 5:   return 0.02
+    elif years <= 9:  return 0.05
+    elif years <= 12: return 0.0
+    else:             return -0.03
 
 
 def score_location(profile: dict, signals: dict) -> float:
@@ -618,68 +604,32 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
     Generates a specific 1-2 sentence reasoning for Stage 4 manual review.
     Must reference actual profile data — no generic filler.
     """
-    years       = float(profile.get("years_of_experience", 0) or 0)
-    curr_title  = (profile.get("current_title", "") or "N/A")
-    curr_co     = (profile.get("current_company", "") or "")
-    location    = (profile.get("location", "") or "N/A")
-    rr          = float(signals.get("recruiter_response_rate", 0) or 0)
-
-    # Top Tier1 skill hits
     tier1_hits = [
         s.get("name", "") for s in skills
         if len(s.get("name", "").lower()) >= 3
         and any(kw in s.get("name", "").lower() or s.get("name", "").lower() in kw
                 for kw in TIER1_SKILLS)
     ]
-
-    # Production shipping evidence from career
-    system_evidence = None
-    for job in career[:3]:
-        desc = (job.get("description", "") or "").lower()
-        if any(kw in desc for kw in ("retrieval", "search", "recommendation", "ranking", "vector", "embedding")):
-            system_evidence = f"{job.get('title','?')} at {job.get('company','?')}"
-            break
-
-    # Concerns
-    concerns = []
-    if consult_frac > 0.65:
-        concerns.append(f"consulting-heavy career ({consult_frac:.0%} IT services)")
-    if notice > 60:
-        concerns.append(f"{notice}d notice period")
-    if not signals.get("open_to_work_flag", False):
-        concerns.append("not marked open-to-work")
-    last_dt = parse_date(signals.get("last_active_date", ""))
-    if last_dt:
-        days = (TODAY - last_dt).days
-        if days > 90:
-            concerns.append(f"inactive {days}d on platform")
-    if rr < 0.25:
-        concerns.append(f"{rr:.0%} recruiter response rate")
-    if prod_ratio < 0.30:
-        concerns.append("limited production deployment signals in career descriptions")
-
-    intro = f"{curr_title} at {curr_co}" if curr_co else curr_title
-
-    has_ship = any(
-        any(kw in (j.get("description", "") or "").lower()
-            for kw in ("production", "shipped", "deployed", "live system", "real users"))
-        for j in career
-    )
-    ship_str = "shipped/deployed to production" if has_ship else "research/academic focus"
-    tier1_str = ", ".join(tier1_hits[:3]) if tier1_hits else "none detected"
-
-    if concerns:
-        s1 = f"{intro} ({years:.1f}yr) has relevant retrieval skills ({tier1_str}) but gaps: {'; '.join(concerns[:2])}."
-        s2 = f"Notice: {notice}d."
-    elif system_evidence or tier1_hits:
-        s1 = f"{intro} ({years:.1f}yr) shows strong JD alignment: {ship_str}; key skills: {tier1_str}."
-        s2 = f"Location {location}; notice {notice}d; response rate {rr:.0%}."
+    
+    career_desc = " ".join(j.get("description", "") or "" for j in career).lower()
+    has_ship = any(kw in career_desc for kw in ("production", "shipped", "deployed", "live system", "real users", "scaled system"))
+    
+    skills_str = " and ".join(tier1_hits[:2]) if tier1_hits else "relevant skills"
+    
+    if final_score > 0.70:
+        if has_ship:
+            base = f"Strong retrieval/search fit with {skills_str} experience in a product environment."
+        else:
+            base = f"Strong recommendation-system background with {skills_str}; fits retrieval-heavy role."
+            
+        if notice >= 60:
+            return f"{base} Good match for JD despite {notice}-day notice period."
+        else:
+            return f"{base} Excellent availability ({notice}-day notice)."
     else:
-        s1 = f"{intro} ({years:.1f}yr) — no explicit retrieval/search skill evidence detected in structured fields."
-        s2 = f"Ranked on career description signals and behavioral score alone; notice {notice}d."
-
-    reasoning = f"{s1} {s2}".strip()
-    return reasoning[:420] + "..." if len(reasoning) > 420 else reasoning
+        if not tier1_hits:
+            return f"Missing core retrieval/search skills for the founding role. Notice period: {notice} days."
+        return f"Partial match with {skills_str}, but lacks strong production or seniority signals."
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -709,17 +659,56 @@ def deep_score(candidate: dict) -> tuple[float, str]:
     skill_fit, disq_frac   = score_skill_fit(skills, extra_text, career)
     product_fit, consult_frac, prod_ratio = score_product_fit(profile, career)
     behavioral  = score_behavioral(signals, notice)
-    exp_fit     = score_experience_fit(profile)
     loc_sc      = score_location(profile, signals)
     penalties   = compute_hard_penalties(profile, career, skills, signals)
 
-    raw = (
+    # 1. Experience score (additive)
+    exp_boost = score_experience_fit(profile)
+    
+    # 2. Title boost (additive)
+    title = (profile.get("current_title", "") or "").lower()
+    title_boost = 0.0
+    if "search engineer" in title or "recommendation systems engineer" in title:
+        title_boost = 0.18
+    elif "applied ml engineer" in title or "senior ml engineer" in title or "senior machine learning engineer" in title:
+        title_boost = 0.15
+    elif "nlp engineer" in title:
+        title_boost = 0.12
+    elif "ai engineer" in title:
+        title_boost = 0.10
+    elif "data scientist" in title:
+        title_boost = 0.04
+    elif "research engineer" in title:
+        title_boost = -0.06
+    elif "research scientist" in title:
+        title_boost = -0.08
+
+    # 4. Research penalty & 6. Production boost
+    career_desc = " ".join(j.get("description", "") or "" for j in career).lower()
+    full_text = extra_text.lower() + " " + career_desc
+    
+    is_research = any(kw in full_text for kw in ("research", "academic", "paper", "publication", "thesis"))
+    has_prod = any(kw in full_text for kw in ("ranking system", "retrieval infra", "recommendation system", "production system", "shipped", "deployed", "productionized", "scaled system", "owned ranking infra", "owned search infra"))
+    
+    res_penalty = 0.0
+    if is_research and not has_prod:
+        res_penalty = -0.08
+        
+    prod_boost = 0.08 if has_prod else 0.0
+
+    # 5. Notice period boost
+    if notice <= 30: notice_boost = 0.06
+    elif notice <= 60: notice_boost = 0.02
+    elif notice <= 90: notice_boost = -0.04
+    else: notice_boost = -0.08
+
+    base_raw = (
         0.30 * skill_fit
       + 0.20 * product_fit
       + 0.35 * behavioral
-      + 0.10 * exp_fit
       + 0.05 * loc_sc
     )
+    raw = base_raw + exp_boost + title_boost + res_penalty + notice_boost + prod_boost
     final = clamp(raw - penalties)
 
     reasoning = generate_reasoning(
