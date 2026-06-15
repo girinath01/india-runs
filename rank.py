@@ -646,15 +646,19 @@ def compute_score(candidate: dict) -> tuple:
         penalty *= 0.38
 
     # ── Weighted sum ─────────────────────────────────────────────────────────
+    # Company size bonus: small startups (1-50) are product-company signal
+    company_size = profile.get("current_company_size", "")
+    startup_bonus = 1.05 if company_size in ("1-10", "11-50", "51-200") else 1.0
+
     raw = (
-        0.28 * ai_skill_score
+        0.26 * ai_skill_score
         + 0.22 * title_score
         + 0.20 * prod_score
         + 0.12 * exp_score
         + 0.10 * behavioral_score
         + 0.06 * location_score
-        + 0.02 * edu_score
-    )
+        + 0.04 * edu_score
+    ) * startup_bonus
 
     final_score = clamp(raw * penalty)
 
