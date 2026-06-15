@@ -351,6 +351,12 @@ def score_skill_fit(skills: list, extra_text: str = "", career: list | None = No
         endorse = min(int(skill.get("endorsements", 0) or 0), 100)
         duration = min(int(skill.get("duration_months", 0) or 0), 72)
         weight = prof * (1 + endorse / 200.0 + duration / 144.0)
+
+        if "rag" in name or "retrieval augmented generation" in name:
+            weight *= 0.60
+        elif "sentence-transformer" in name or "sentence transformer" in name:
+            weight *= 0.75
+
         total_w += weight
 
         if any(kw in name or name in kw for kw in TIER1_SKILLS):
@@ -616,29 +622,30 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
     
     skills_str = " and ".join(tier1_hits[:2]) if tier1_hits else "relevant skills"
     
-    cid = profile.get("id", "CAND")
-    variant = hash(cid) % 3
+    # Deterministic variant based on profile length to ensure variety
+    variant = (len(career) * 7 + len(skills)) % 4
     
     if final_score > 0.70:
-        if has_ship:
-            if variant == 0:
-                base = f"Built production retrieval pipelines using {skills_str}; good match for search-heavy JD."
-            elif variant == 1:
-                base = f"Strong {skills_str} and vector DB experience with product deployment history."
-            else:
-                base = f"{skills_str} experience closely aligns with retrieval-focused requirements."
+        if variant == 0:
+            s = f"Built production retrieval pipelines using {skills_str}; strong fit for ranking/search-focused role."
+        elif variant == 1:
+            s = f"Strong recommendation-system and semantic-search background with hands-on {skills_str}; aligns closely with retrieval-heavy JD."
+        elif variant == 2:
+            s = f"Experience in search infrastructure using {skills_str}; strong product-oriented fit."
         else:
-            if variant == 0:
-                base = f"Strong recommendation-system background with {skills_str}; fits retrieval-heavy role."
-            elif variant == 1:
-                base = f"Solid theoretical foundation in {skills_str}; good alignment for ranking tasks."
-            else:
-                base = f"Demonstrates strong knowledge of {skills_str} suitable for search relevance."
+            s = f"Demonstrated retrieval and ranking expertise through {skills_str}."
             
         if notice >= 60:
-            return f"{base} Slightly weaker fit due to {notice}-day notice period."
+            if variant in (2, 3):
+                s += f" Slightly weaker due to {notice}-day notice period."
+            else:
+                s += f" Slightly weaker fit due to {notice}-day notice period."
         else:
-            return f"{base} Excellent availability ({notice}-day notice) improves fit."
+            if variant == 2:
+                s = f"Experience in search infrastructure using {skills_str}; strong product-oriented fit with good availability."
+            elif variant == 3:
+                s += f" Excellent availability ({notice}-day notice)."
+        return s
     else:
         if not tier1_hits:
             return f"Missing core retrieval/search skills for the founding role. Notice period: {notice} days."
@@ -715,13 +722,34 @@ def deep_score(candidate: dict) -> tuple[float, str]:
     elif notice <= 90: notice_boost = -0.04
     else: notice_boost = -0.08
 
+    # NEW: 7. Explicit JD skill boosts
+    jd_skill_boost = 0.0
+    if "learning to rank" in full_text or "ltr" in full_text or "lambdamart" in full_text:
+        jd_skill_boost += 0.08
+    if "bm25" in full_text:
+        jd_skill_boost += 0.06
+    if "ranking system" in full_text or "search ranking" in full_text:
+        jd_skill_boost += 0.08
+    if "information retrieval" in full_text:
+        jd_skill_boost += 0.06
+
+    # NEW: 8. Tie breakers
+    rr = float(signals.get("recruiter_response_rate", 0) or 0)
+    otw = 1.0 if signals.get("open_to_work_flag", False) else 0.0
+    last_dt = parse_date(signals.get("last_active_date", ""))
+    recent_activity = 1.0
+    if last_dt:
+        days = (TODAY - last_dt).days
+        recent_activity = max(0.0, 1.0 - (days / 180.0))
+    tie_break = (0.01 * rr) + (0.005 * recent_activity) + (0.005 * otw)
+
     base_raw = (
         0.30 * skill_fit
       + 0.20 * product_fit
       + 0.35 * behavioral
       + 0.05 * loc_sc
     )
-    raw = base_raw + exp_boost + title_boost + res_penalty + notice_boost + prod_boost
+    raw = base_raw + exp_boost + title_boost + res_penalty + notice_boost + prod_boost + jd_skill_boost + tie_break
     final = max(0.0, raw - penalties)
 
     reasoning = generate_reasoning(
