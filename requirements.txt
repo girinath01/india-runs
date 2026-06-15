@@ -1,0 +1,6 @@
+# Redrob Hackathon — Bug Hunters
+# Minimal dependencies: pure Python + lightweight packages only
+# No GPU packages, no heavy ML frameworks at inference time
+
+tqdm>=4.65.0
+pyyaml>=6.0
