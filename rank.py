@@ -482,5 +482,97 @@ def score_behavioral(signals: dict) -> float:
     return sum(sub_scores) / len(sub_scores)
 
 
+def score_location(profile: dict, signals: dict) -> float:
+    """Score location fit for Pune/Noida-focused JD."""
+    location = profile.get("location", "").lower()
+    country = profile.get("country", "").lower()
+    willing_to_relocate = signals.get("willing_to_relocate", False)
+
+    is_india = country in ("india", "in") or country == ""
+
+    if not is_india:
+        return 0.45 if willing_to_relocate else 0.20
+
+    for city in PREFERRED_INDIA_LOCATIONS:
+        if city in location:
+            if any(p in location for p in ("pune", "noida", "delhi", "gurgaon", "gurugram", "ncr")):
+                return 1.0
+            return 0.85
+
+    return 0.65 if willing_to_relocate else 0.50
+
+
+def score_education(education: list) -> float:
+    """Score education tier and field relevance."""
+    if not education:
+        return 0.35
+
+    TIER_SCORES = {"tier_1": 1.0, "tier_2": 0.80, "tier_3": 0.60, "tier_4": 0.40, "unknown": 0.50}
+    RELEVANT_FIELDS = {
+        "computer science", "cs", "information technology",
+        "machine learning", "artificial intelligence", "data science",
+        "mathematics", "statistics", "electrical", "electronics",
+        "software engineering", "information systems", "engineering",
+        "computational", "operations research",
+    }
+
+    best = 0.0
+    for edu in education:
+        tier = edu.get("tier", "unknown")
+        field = edu.get("field_of_study", "").lower()
+        t_score = TIER_SCORES.get(tier, 0.50)
+        field_bonus = 0.15 if any(f in field for f in RELEVANT_FIELDS) else 0.0
+        best = max(best, min(1.0, t_score + field_bonus))
+
+    return best
+
+
+def detect_honeypot(candidate: dict) -> bool:
+    """
+    Detect profiles with internally impossible data.
+    ~80 honeypots in the dataset. >10% in top 100 → submission disqualified.
+
+    Four impossibility checks:
+    1. Job duration exceeds time since start date
+    2. Expert proficiency + 0 duration on 3+ skills
+    3. Claimed years of experience > 2.8x career history total
+    4. 20+ skills all marked expert/advanced (keyword stuffer)
+    """
+    profile = candidate.get("profile", {})
+    career_history = candidate.get("career_history", [])
+    skills = candidate.get("skills", [])
+
+    for job in career_history:
+        start_str = job.get("start_date", "")
+        stated_duration = job.get("duration_months", 0)
+        if start_str and stated_duration > 0:
+            try:
+                start = datetime.strptime(start_str, "%Y-%m-%d").date()
+                max_possible = (TODAY.year - start.year) * 12 + (TODAY.month - start.month) + 3
+                if stated_duration > max_possible + 6:
+                    return True
+            except ValueError:
+                pass
+
+    expert_zero = sum(
+        1 for s in skills
+        if s.get("proficiency") == "expert" and s.get("duration_months", 1) == 0
+    )
+    if expert_zero >= 3:
+        return True
+
+    claimed_yrs = profile.get("years_of_experience", 0)
+    actual_months = sum(j.get("duration_months", 0) for j in career_history)
+    actual_yrs = actual_months / 12.0
+    if claimed_yrs > 3 and actual_yrs > 0 and claimed_yrs > actual_yrs * 2.8:
+        return True
+
+    high_prof_count = sum(1 for s in skills if s.get("proficiency") in ("expert", "advanced"))
+    if high_prof_count >= 20:
+        return True
+
+    return False
+
+
 if __name__ == "__main__":
-    print("Experience, production, and behavioral scorers loaded OK.")
+    print("All component scorers and honeypot detector loaded OK.")
