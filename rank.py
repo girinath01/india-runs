@@ -608,124 +608,137 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
 # ─────────────────────────────────────────────────────────────────────────────
 
 TPL_SEARCH = [
-    "Built scalable search infrastructure using {s1} and {s2}; strong fit for retrieval-focused role.",
-    "Hands-on search-platform experience with {s1} and {s2}; aligns well with ranking-heavy JD.",
-    "Demonstrated production search engineering expertise through {s1}; strong relevance for search-oriented systems.",
-    "Strong search-stack background with {s1} and {s2}; good product-system alignment.",
-    "Extensive background in enterprise search systems utilizing {s1} and {s2}; highly applicable to this role.",
-    "Deep technical capability in search architecture via {s1}; perfect match for retrieval optimization tasks.",
-    "Proven track record building fast search engines with {s1} and {s2}; closely matches core JD needs.",
-    "Solid search infrastructure capabilities featuring {s1}; an excellent candidate for the relevance engineering team.",
-    "Engineered advanced search solutions using {s1} and {s2}; strongly positioned for a ranking-centric position.",
-    "Demonstrates exceptional proficiency in search relevance and indexing through {s1}; clear match for the role."
+    "Exposure to scalable search infrastructure using {s1} and {s2}; {tone_adj} fit for retrieval-focused role.",
+    "Hands-on search-platform experience with {s1} and {s2}; shows {tone_adj} alignment with ranking-heavy JD.",
+    "Demonstrated search engineering exposure through {s1} and {s2}; provides {tone_adj} relevance for search-oriented systems.",
+    "Search-stack background with {s1} and {s2}; indicates {tone_adj} product-system alignment.",
+    "Background in enterprise search systems utilizing {s1} and {s2}; {tone_adj} match for this role.",
+    "Hands-on search infrastructure experience via {s1} and {s2}; {tone_adj} fit for retrieval optimization tasks.",
+    "Experience building search engines with {s1} and {s2}; provides {tone_adj} alignment with core JD needs.",
+    "Search infrastructure capabilities featuring {s1} and {s2}; {tone_adj} candidate for the relevance engineering team.",
+    "Exposure to advanced search solutions using {s1} and {s2}; shows {tone_adj} positioning for a ranking-centric position.",
+    "Shows relevant exposure to search relevance and indexing through {s1} and {s2}; {tone_adj} alignment for the role."
 ]
 
 TPL_RANKING = [
-    "Demonstrated retrieval and ranking expertise through {s1} and {s2}; highly aligned with ranking-focused requirements.",
-    "Strong ranking-system experience using {s1}; valuable fit for recommendation and retrieval optimization.",
-    "Built ranking-oriented retrieval systems using {s1} and {s2}; strong signal for JD relevance.",
-    "Advanced knowledge of learning-to-rank methodologies via {s1} and {s2}; directly applicable to the core mission.",
-    "Extensive experience optimizing search ranking models using {s1}; exceptional fit for this engineering role.",
-    "Proven success engineering ranking algorithms with {s1} and {s2}; perfectly suited for relevance maximization.",
-    "Deep understanding of retrieval relevance and ranking heuristics utilizing {s1}; strongly aligns with team goals.",
-    "Deployed high-performance ranking pipelines with {s1} and {s2}; demonstrates exactly the required ranking acumen.",
-    "Specialized in search relevance and ranking with {s1}; a prime candidate for the recommendation systems team.",
-    "Engineered robust ranking components utilizing {s1} and {s2}; highly recommended for core search optimization."
+    "Retrieval and ranking exposure through {s1} and {s2}; {tone_adj} alignment with ranking-focused requirements.",
+    "Ranking-system experience using {s1} and {s2}; {tone_adj} fit for recommendation and retrieval optimization.",
+    "Exposure to ranking-oriented retrieval systems using {s1} and {s2}; provides {tone_adj} signal for JD relevance.",
+    "Knowledge of learning-to-rank methodologies via {s1} and {s2}; {tone_adj} match for the core mission.",
+    "Relevant ranking and retrieval exposure using {s1} and {s2}; {tone_adj} fit for this engineering role.",
+    "Experience with ranking algorithms with {s1} and {s2}; {tone_adj} fit for relevance maximization.",
+    "Understanding of retrieval relevance and ranking heuristics utilizing {s1} and {s2}; {tone_adj} alignment with team goals.",
+    "Exposure to ranking pipelines with {s1} and {s2}; demonstrates {tone_adj} relevance for ranking acumen.",
+    "Experience with retrieval and ranking-related systems using {s1} and {s2}; {tone_adj} candidate for the recommendation systems team.",
+    "Exposure to ranking components utilizing {s1} and {s2}; {tone_adj} fit for core search optimization."
 ]
 
 TPL_REC = [
-    "Strong recommendation-system background with hands-on {s1} and {s2}; fits personalization-heavy search use cases.",
-    "Experience building recommendation pipelines using {s1}; strong alignment with retrieval-oriented systems.",
-    "Built production recommendation workflows using {s1} and {s2}; good product relevance.",
-    "Advanced personalization and recommendation capabilities using {s1}; highly relevant to discovery surfaces.",
-    "Proven track record in recommendation engine development featuring {s1} and {s2}; aligns with relevance goals.",
-    "Extensive experience scaling recommendation architectures via {s1}; great fit for personalized retrieval tasks.",
-    "Engineered complex recommendation systems with {s1} and {s2}; demonstrates strong aptitude for candidate generation.",
-    "Deep technical background in personalization models using {s1}; matches the recommendation demands of the JD.",
-    "Designed robust recommendation and ranking solutions utilizing {s1} and {s2}; exceptional product-centric fit.",
-    "Solid hands-on expertise in recommendation logic with {s1}; highly applicable for the relevance engineering team."
+    "Recommendation-system background with hands-on {s1} and {s2}; {tone_adj} fit for personalization-heavy search use cases.",
+    "Experience building recommendation pipelines using {s1} and {s2}; {tone_adj} alignment with retrieval-oriented systems.",
+    "Exposure to recommendation workflows using {s1} and {s2}; shows {tone_adj} product relevance.",
+    "Personalization and recommendation capabilities using {s1} and {s2}; {tone_adj} fit for discovery surfaces.",
+    "Experience in recommendation engine development featuring {s1} and {s2}; {tone_adj} alignment with relevance goals.",
+    "Experience with recommendation architectures via {s1} and {s2}; {tone_adj} fit for personalized retrieval tasks.",
+    "Exposure to recommendation systems with {s1} and {s2}; demonstrates {tone_adj} aptitude for candidate generation.",
+    "Technical background in personalization models using {s1} and {s2}; {tone_adj} match for the recommendation demands of the JD.",
+    "Experience with recommendation and ranking solutions utilizing {s1} and {s2}; {tone_adj} product-centric fit.",
+    "Hands-on exposure to recommendation logic with {s1} and {s2}; {tone_adj} fit for the relevance engineering team."
 ]
 
 TPL_SEMANTIC = [
-    "Strong semantic-search expertise with {s1} and {s2}; relevant for embedding-driven retrieval systems.",
-    "Hands-on experience in semantic retrieval using {s1}; supports retrieval-heavy product requirements.",
-    "Advanced background in NLP and semantic search utilizing {s1} and {s2}; well-suited for modern retrieval tasks.",
-    "Demonstrates deep knowledge of embedding-based search with {s1}; strongly aligns with AI-driven retrieval.",
-    "Built semantic similarity and search pipelines using {s1} and {s2}; a great fit for neural search applications.",
-    "Proven success with dense retrieval systems using {s1}; highly relevant to the semantic relevance goals.",
-    "Extensive NLP and semantic architecture experience featuring {s1} and {s2}; matches neural retrieval needs.",
-    "Engineered modern semantic search capabilities via {s1}; demonstrates the required AI engineering proficiency.",
-    "Solid background in text embeddings and semantic indexing with {s1} and {s2}; applicable for search relevance.",
-    "Specialized in neural and semantic retrieval methods utilizing {s1}; strong potential for search optimization."
+    "Semantic-search exposure with {s1} and {s2}; {tone_adj} fit for embedding-driven retrieval systems.",
+    "Hands-on experience in semantic retrieval using {s1} and {s2}; supports {tone_adj} alignment with retrieval-heavy product requirements.",
+    "Background in NLP and semantic search utilizing {s1} and {s2}; {tone_adj} match for modern retrieval tasks.",
+    "Knowledge of embedding-based search with {s1} and {s2}; {tone_adj} alignment with AI-driven retrieval.",
+    "Experience with semantic similarity and search pipelines using {s1} and {s2}; {tone_adj} fit for neural search applications.",
+    "Experience with dense retrieval systems using {s1} and {s2}; {tone_adj} relevance to the semantic relevance goals.",
+    "NLP and semantic architecture experience featuring {s1} and {s2}; {tone_adj} match for neural retrieval needs.",
+    "Exposure to modern semantic search capabilities via {s1} and {s2}; demonstrates {tone_adj} relevance for AI engineering proficiency.",
+    "Background in text embeddings and semantic indexing with {s1} and {s2}; {tone_adj} fit for search relevance.",
+    "Experience with neural and semantic retrieval methods utilizing {s1} and {s2}; {tone_adj} potential for search optimization."
 ]
 
 TPL_VECTOR = [
-    "Experience building vector-search pipelines using {s1} and {s2}; relevant for large-scale retrieval systems.",
-    "Strong vector database exposure through {s1}; useful for retrieval optimization.",
-    "Advanced capabilities in vector indexing and ANN search with {s1} and {s2}; directly matches JD requirements.",
-    "Proven track record deploying vector DBs via {s1}; an excellent candidate for embedding-heavy architectures.",
-    "Extensive experience operating large-scale vector stores using {s1} and {s2}; highly relevant to the role.",
-    "Engineered high-throughput vector retrieval systems with {s1}; demonstrates the required scalability expertise.",
-    "Deep knowledge of approximate nearest neighbor search utilizing {s1} and {s2}; perfect fit for fast retrieval.",
-    "Solid hands-on vector database management via {s1}; closely aligns with the search infrastructure needs.",
-    "Built robust vector similarity search solutions using {s1} and {s2}; strongly positioned for this engineering team.",
-    "Specialized in vector search optimization and indexing with {s1}; highly applicable for recommendation workflows."
+    "Experience building vector-search pipelines using {s1} and {s2}; {tone_adj} fit for large-scale retrieval systems.",
+    "Vector database exposure through {s1} and {s2}; {tone_adj} fit for retrieval optimization.",
+    "Capabilities in vector indexing and ANN search with {s1} and {s2}; {tone_adj} match for JD requirements.",
+    "Experience deploying vector DBs via {s1} and {s2}; {tone_adj} candidate for embedding-heavy architectures.",
+    "Experience operating large-scale vector stores using {s1} and {s2}; {tone_adj} relevance to the role.",
+    "Exposure to vector retrieval systems with {s1} and {s2}; demonstrates {tone_adj} alignment with scalability expertise.",
+    "Hands-on vector retrieval exposure using {s1} and {s2}; {tone_adj} fit for embedding-driven retrieval systems.",
+    "Hands-on vector database management via {s1} and {s2}; {tone_adj} alignment with the search infrastructure needs.",
+    "Experience with vector similarity search solutions using {s1} and {s2}; {tone_adj} positioning for this engineering team.",
+    "Exposure to vector search optimization and indexing with {s1} and {s2}; {tone_adj} fit for recommendation workflows."
 ]
 
 TPL_PROD = [
-    "Built production-grade retrieval systems using {s1} and {s2}; strong evidence of shipping capability.",
-    "Demonstrated hands-on deployment experience with {s1}; strong product-oriented signal.",
-    "Proven track record scaling production architectures with {s1} and {s2}; aligns perfectly with shipping goals.",
-    "Extensive experience shipping live search systems using {s1}; highly relevant for a product-focused engineering role.",
-    "Engineered high-traffic retrieval deployments utilizing {s1} and {s2}; demonstrates exceptional production readiness.",
-    "Solid history of deploying real-world search applications with {s1}; a great fit for this fast-paced team.",
-    "Advanced production engineering capabilities via {s1} and {s2}; strongly supports the requirement for shipped systems.",
-    "Successfully launched scalable search and recommendation products using {s1}; clearly matches the builder profile.",
-    "Deep technical experience pushing {s1} and {s2} to production users; exceptional evidence of real-world impact.",
-    "Specialized in productionizing complex search architectures with {s1}; highly applicable for live deployment tasks."
+    "Experience with production-grade retrieval systems using {s1} and {s2}; {tone_adj} evidence of shipping capability.",
+    "Hands-on deployment experience with {s1} and {s2}; {tone_adj} product-oriented signal.",
+    "Experience scaling production architectures with {s1} and {s2}; {tone_adj} alignment with shipping goals.",
+    "Experience shipping live search systems using {s1} and {s2}; {tone_adj} relevance for a product-focused engineering role.",
+    "Exposure to high-traffic retrieval deployments utilizing {s1} and {s2}; demonstrates {tone_adj} production readiness.",
+    "History of deploying real-world search applications with {s1} and {s2}; {tone_adj} fit for this fast-paced team.",
+    "Production engineering capabilities via {s1} and {s2}; {tone_adj} match for the requirement for shipped systems.",
+    "Exposure to production-oriented retrieval systems using {s1} and {s2}; {tone_adj} fit for product-focused engineering.",
+    "Technical experience pushing {s1} and {s2} to production users; {tone_adj} evidence of real-world impact.",
+    "Experience productionizing complex search architectures with {s1} and {s2}; {tone_adj} fit for live deployment tasks."
 ]
 
 TPL_BALANCED = [
-    "Balanced experience across retrieval, ranking, and recommendation systems; closely matches JD priorities.",
-    "Strong mix of search infrastructure and ranking signals using {s1} and {s2}.",
-    "Demonstrates a comprehensive blend of recommendation and retrieval skills with {s1}; an exceptional overall fit.",
-    "Well-rounded background in search relevance and vector systems via {s1} and {s2}; highly aligned with the JD.",
-    "Exhibits a balanced portfolio of ranking and semantic search expertise using {s1}; perfect for this hybrid role.",
-    "Solid combination of production search engineering and recommendation logic with {s1} and {s2}; a prime candidate.",
-    "Extensive multi-domain experience spanning retrieval, vector DBs, and ranking via {s1}; matches the founding engineer profile.",
-    "Provides a strong mixture of search infrastructure capabilities and personalization algorithms using {s1} and {s2}.",
-    "Balanced technical capability in modern search and classic ranking utilizing {s1}; highly relevant to the mission.",
-    "Comprehensive search engineering profile featuring {s1} and {s2}; perfectly suited for cross-functional retrieval tasks."
+    "Balanced experience across retrieval, ranking, and recommendation systems using {s1} and {s2}; {tone_adj} match for JD priorities.",
+    "Mix of search infrastructure and ranking signals using {s1} and {s2}; {tone_adj} overall fit.",
+    "Blend of recommendation and retrieval skills with {s1} and {s2}; {tone_adj} overall fit.",
+    "Background in search relevance and vector systems via {s1} and {s2}; {tone_adj} alignment with the JD.",
+    "Portfolio of ranking and semantic search expertise using {s1} and {s2}; {tone_adj} fit for this hybrid role.",
+    "Combination of production search engineering and recommendation logic with {s1} and {s2}; {tone_adj} candidate.",
+    "Multi-domain experience spanning retrieval, vector DBs, and ranking via {s1} and {s2}; {tone_adj} match for the founding engineer profile.",
+    "Mixture of search infrastructure capabilities and personalization algorithms using {s1} and {s2}; {tone_adj} relevance.",
+    "Balanced technical capability in modern search and classic ranking utilizing {s1} and {s2}; {tone_adj} relevance to the mission.",
+    "Search engineering profile featuring {s1} and {s2}; {tone_adj} fit for cross-functional retrieval tasks."
 ]
 
 TPL_RAG = [
-    "Relevant retrieval exposure through {s1}, though stronger emphasis on ranking systems would improve fit.",
-    "Useful semantic retrieval background with {s1} and {s2}; slightly weaker than core ranking-focused profiles.",
-    "Demonstrates modern RAG engineering with {s1}; possesses foundational relevance but lacks deep ranking exposure.",
-    "Background in retrieval-augmented generation using {s1} and {s2}; applicable, but traditional search skills are preferred.",
-    "Solid experience with LLM pipelines and {s1}; a reasonable match, though production ranking history is lighter.",
-    "Shows capability in generative AI retrieval via {s1} and {s2}; partially aligns with the core infrastructure demands.",
-    "Engineered RAG-based systems using {s1}; provides some retrieval signal, but requires more focus on scale.",
-    "Possesses emerging semantic capability with {s1} and {s2}; relevant, but slightly outside the core search engine scope.",
-    "Demonstrated usage of RAG architectures featuring {s1}; provides a moderate match to the JD requirements.",
-    "Useful background in LLM-assisted search using {s1} and {s2}; acceptable fit but lacks heavy learning-to-rank focus."
+    "Retrieval exposure through {s1} and {s2}; {tone_adj} fit, though stronger emphasis on ranking systems would improve it further.",
+    "Semantic retrieval background with {s1} and {s2}; {tone_adj} fit, slightly weaker than core ranking-focused profiles.",
+    "RAG engineering with {s1} and {s2}; {tone_adj} relevance but lacks deep ranking exposure.",
+    "Background in retrieval-augmented generation using {s1} and {s2}; {tone_adj} fit, but traditional search skills are preferred.",
+    "Experience with LLM pipelines and {s1} and {s2}; {tone_adj} match, though production ranking history is lighter.",
+    "Capability in generative AI retrieval via {s1} and {s2}; {tone_adj} alignment with the core infrastructure demands.",
+    "Experience with RAG-based systems using {s1} and {s2}; {tone_adj} retrieval signal, but requires more focus on scale.",
+    "Semantic capability with {s1} and {s2}; {tone_adj} relevance, but slightly outside the core search engine scope.",
+    "Usage of RAG architectures featuring {s1} and {s2}; {tone_adj} match to the JD requirements.",
+    "Background in LLM-assisted search using {s1} and {s2}; {tone_adj} fit but lacks heavy learning-to-rank focus."
+]
+
+TPL_DEFAULT = [
+    "Technical foundation in {s1} and {s2}; {tone_adj} fit for ranking and retrieval workflows.",
+    "Knowledge of {s1} and {s2} suitable for search relevance tasks; {tone_adj} alignment.",
+    "Experience utilizing {s1} and {s2}; {tone_adj} relevance to the overall job requirements.",
+    "Background featuring {s1} and {s2}; indicates {tone_adj} potential for the retrieval role.",
+    "Exposure to {s1} and {s2}; demonstrates {tone_adj} alignment with the engineering stack.",
+    "Familiarity with {s1} and {s2}; {tone_adj} fit for the team's technical direction.",
+    "Practical application of {s1} and {s2}; {tone_adj} candidate for further evaluation.",
+    "Competence in {s1} and {s2}; shows {tone_adj} alignment with core search principles.",
+    "Technical exposure encompassing {s1} and {s2}; {tone_adj} fit for retrieval tasks.",
+    "Understanding of modern engineering utilizing {s1} and {s2}; {tone_adj} match for the role."
 ]
 
 AVAIL_SHORT = [
-    " Excellent availability ({notice}-day notice) further strengthens fit.",
-    " Strong profile supported by quick joining availability.",
-    " Good alignment with favorable joining timeline.",
-    " The candidate's {notice}-day notice period is a significant hiring advantage.",
-    " Fast availability ({notice} days) makes this profile highly actionable.",
-    " Exceptionally well-aligned given the immediate {notice}-day joining capability.",
-    " Their short {notice}-day transition period perfectly suits the urgent hiring need.",
-    " Bolstered by a highly favorable {notice}-day availability timeline.",
-    " The rapid {notice}-day notice period is a strong positive for immediate impact.",
+    " Excellent availability ({notice}-day notice) further strengthens the fit.",
+    " Profile supported by quick joining availability.",
+    " Alignment with favorable joining timeline.",
+    " The candidate's {notice}-day notice period is a hiring advantage.",
+    " Fast availability ({notice} days) makes this profile actionable.",
+    " Well-aligned given the immediate {notice}-day joining capability.",
+    " Their short {notice}-day transition period suits the urgent hiring need.",
+    " Bolstered by a favorable {notice}-day availability timeline.",
+    " The rapid {notice}-day notice period is a positive for immediate impact.",
     " Combines technical relevance with an excellent {notice}-day joining window."
 ]
 
 AVAIL_LONG = [
-    " Strong technical relevance, though slightly weaker due to {notice}-day notice period.",
+    " Technical relevance, though slightly weaker due to {notice}-day notice period.",
     " Relevant retrieval profile with moderate availability constraints.",
     " The {notice}-day notice period slightly reduces the immediate actionability.",
     " A solid fit, albeit constrained by a longer {notice}-day transition timeline.",
@@ -788,7 +801,15 @@ def generate_reasoning(profile: dict, career: list, skills: list, signals: dict,
         
     cid = profile.get("id", "CAND")
     variant = (len(career) * 7 + len(skills)) % len(pool)
-    base_reason = pool[variant].format(s1=s1, s2=s2)
+    
+    if final_score > 0.90:
+        tone_adj = "strong"
+    elif final_score > 0.80:
+        tone_adj = "moderate"
+    else:
+        tone_adj = "partial"
+        
+    base_reason = pool[variant].format(s1=s1, s2=s2, tone_adj=tone_adj)
     
     # Append availability modifier
     if final_score > 0.70:
