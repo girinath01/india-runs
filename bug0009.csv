@@ -1,0 +1,101 @@
+candidate_id,rank,score,reasoning
+CAND_0000031,1,1.000000,Strong retrieval/search fit with FAISS and Pinecone experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0009024,2,1.000000,Strong recommendation-system background with Qdrant and FAISS; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0018499,3,1.000000,Strong retrieval/search fit with Weaviate and Recommendation Systems experience in a product environment. Excellent availability (15-day notice).
+CAND_0040117,4,1.000000,Strong recommendation-system background with Embeddings and RAG; fits retrieval-heavy role. Excellent availability (15-day notice).
+CAND_0041610,5,1.000000,Strong retrieval/search fit with Elasticsearch and OpenSearch experience in a product environment. Excellent availability (30-day notice).
+CAND_0041669,6,1.000000,Strong recommendation-system background with FAISS and Milvus; fits retrieval-heavy role. Good match for JD despite 60-day notice period.
+CAND_0042506,7,1.000000,Strong recommendation-system background with Semantic Search and Information Retrieval; fits retrieval-heavy role. Excellent availability (15-day notice).
+CAND_0052328,8,1.000000,Strong retrieval/search fit with OpenSearch and Recommendation Systems experience in a product environment. Excellent availability (30-day notice).
+CAND_0055905,9,1.000000,Strong retrieval/search fit with Elasticsearch and OpenSearch experience in a product environment. Excellent availability (30-day notice).
+CAND_0064326,10,1.000000,Strong retrieval/search fit with Milvus and Semantic Search experience in a product environment. Excellent availability (45-day notice).
+CAND_0065195,11,1.000000,Strong retrieval/search fit with Elasticsearch and Qdrant experience in a product environment. Excellent availability (45-day notice).
+CAND_0066999,12,1.000000,Strong retrieval/search fit with OpenSearch and FAISS experience in a product environment. Excellent availability (15-day notice).
+CAND_0068811,13,1.000000,Strong retrieval/search fit with Vector Search and Qdrant experience in a product environment. Excellent availability (30-day notice).
+CAND_0081846,14,1.000000,Strong recommendation-system background with Information Retrieval and pgvector; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0011687,15,0.997830,Strong retrieval/search fit with OpenSearch and FAISS experience in a product environment. Excellent availability (15-day notice).
+CAND_0027691,16,0.994861,Strong retrieval/search fit with Recommendation Systems and Weaviate experience in a product environment. Excellent availability (15-day notice).
+CAND_0033179,17,0.986164,Strong retrieval/search fit with OpenSearch and Information Retrieval experience in a product environment. Excellent availability (30-day notice).
+CAND_0053695,18,0.984180,Strong retrieval/search fit with Pinecone and Recommendation Systems experience in a product environment. Excellent availability (15-day notice).
+CAND_0007009,19,0.981047,Strong recommendation-system background with Weaviate and Embeddings; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0018549,20,0.974338,Strong recommendation-system background with Weaviate and Elasticsearch; fits retrieval-heavy role. Good match for JD despite 60-day notice period.
+CAND_0046064,21,0.969827,Strong retrieval/search fit with Pinecone and BM25 experience in a product environment. Excellent availability (30-day notice).
+CAND_0014440,22,0.964801,Strong retrieval/search fit with Elasticsearch and Milvus experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0075249,23,0.960347,Strong recommendation-system background with Sentence Transformers and Milvus; fits retrieval-heavy role. Excellent availability (45-day notice).
+CAND_0036184,24,0.960020,Strong recommendation-system background with FAISS and Semantic Search; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0017960,25,0.958294,Strong retrieval/search fit with Qdrant and Information Retrieval experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0010685,26,0.953568,Strong retrieval/search fit with Information Retrieval and Elasticsearch experience in a product environment. Excellent availability (30-day notice).
+CAND_0010541,27,0.953506,Strong retrieval/search fit with Pinecone and Weaviate experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0077285,28,0.952382,Strong retrieval/search fit with Pinecone and Sentence Transformers experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0008295,29,0.950536,Strong retrieval/search fit with BM25 and Weaviate experience in a product environment. Excellent availability (45-day notice).
+CAND_0010770,30,0.950145,Strong retrieval/search fit with Qdrant and Learning to Rank experience in a product environment. Excellent availability (30-day notice).
+CAND_0079387,31,0.950059,Strong retrieval/search fit with Recommendation Systems and Sentence Transformers experience in a product environment. Excellent availability (30-day notice).
+CAND_0078492,32,0.949462,Strong recommendation-system background with FAISS and Recommendation Systems; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0036437,33,0.945995,Strong retrieval/search fit with OpenSearch and Elasticsearch experience in a product environment. Excellent availability (30-day notice).
+CAND_0099806,34,0.945213,Strong retrieval/search fit with RAG and pgvector experience in a product environment. Excellent availability (30-day notice).
+CAND_0076251,35,0.945079,Strong retrieval/search fit with Weaviate and Learning to Rank experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0098952,36,0.944077,Strong retrieval/search fit with Recommendation Systems and OpenSearch experience in a product environment. Excellent availability (45-day notice).
+CAND_0071974,37,0.943693,Strong retrieval/search fit with Learning to Rank and Weaviate experience in a product environment. Excellent availability (45-day notice).
+CAND_0002025,38,0.943329,Strong retrieval/search fit with FAISS and OpenSearch experience in a product environment. Excellent availability (30-day notice).
+CAND_0052682,39,0.942709,Strong recommendation-system background with Semantic Search and FAISS; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0005311,40,0.937323,Strong retrieval/search fit with Semantic Search and Qdrant experience in a product environment. Excellent availability (30-day notice).
+CAND_0043381,41,0.937194,Strong retrieval/search fit with BM25 and OpenSearch experience in a product environment. Excellent availability (45-day notice).
+CAND_0004402,42,0.932677,Strong retrieval/search fit with OpenSearch and Learning to Rank experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0011327,43,0.932374,Strong retrieval/search fit with Sentence Transformers and Semantic Search experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0011162,44,0.928446,Strong retrieval/search fit with FAISS and Vector Search experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0053591,45,0.926701,Strong retrieval/search fit with Embeddings and Milvus experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0088378,46,0.922534,Strong retrieval/search fit with Elasticsearch and Sentence Transformers experience in a product environment. Excellent availability (45-day notice).
+CAND_0054394,47,0.920884,Strong recommendation-system background with Embeddings and Pinecone; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0020708,48,0.920312,Strong recommendation-system background with Learning to Rank and Elasticsearch; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0093883,49,0.920263,Strong retrieval/search fit with BM25 and Qdrant experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0051292,50,0.916992,Strong recommendation-system background with pgvector and FAISS; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0041568,51,0.915801,Strong recommendation-system background with Weaviate and Vector Search; fits retrieval-heavy role. Good match for JD despite 90-day notice period.
+CAND_0031593,52,0.914225,Strong recommendation-system background with Recommendation Systems and BM25; fits retrieval-heavy role. Good match for JD despite 90-day notice period.
+CAND_0058688,53,0.913739,Strong retrieval/search fit with Embeddings and Information Retrieval experience in a product environment. Excellent availability (15-day notice).
+CAND_0025640,54,0.911453,Strong retrieval/search fit with Semantic Search and Information Retrieval experience in a product environment. Excellent availability (30-day notice).
+CAND_0094685,55,0.901799,Strong retrieval/search fit with Weaviate and pgvector experience in a product environment. Excellent availability (45-day notice).
+CAND_0039383,56,0.900925,Strong retrieval/search fit with FAISS and Recommendation Systems experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0062247,57,0.896328,Strong recommendation-system background with Pinecone and Vector Search; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0045250,58,0.895410,Strong retrieval/search fit with Sentence Transformers and Milvus experience in a product environment. Excellent availability (15-day notice).
+CAND_0026532,59,0.894486,Strong recommendation-system background with pgvector and Embeddings; fits retrieval-heavy role. Good match for JD despite 90-day notice period.
+CAND_0039838,60,0.891261,Strong retrieval/search fit with Embeddings and Semantic Search experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0061265,61,0.890973,Strong retrieval/search fit with Qdrant and Learning to Rank experience in a product environment. Good match for JD despite 120-day notice period.
+CAND_0066376,62,0.890435,Strong recommendation-system background with Recommendation Systems and Learning to Rank; fits retrieval-heavy role. Good match for JD despite 90-day notice period.
+CAND_0054318,63,0.889627,Strong retrieval/search fit with Semantic Search and Information Retrieval experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0061339,64,0.886012,Strong retrieval/search fit with Information Retrieval and Milvus experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0040200,65,0.885938,Strong retrieval/search fit with FAISS and Weaviate experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0022023,66,0.884321,Strong retrieval/search fit with Semantic Search and Elasticsearch experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0049896,67,0.881921,Strong recommendation-system background with Sentence Transformers and Information Retrieval; fits retrieval-heavy role. Good match for JD despite 90-day notice period.
+CAND_0007412,68,0.880444,Strong retrieval/search fit with Pinecone and Milvus experience in a product environment. Good match for JD despite 120-day notice period.
+CAND_0060054,69,0.879110,Strong retrieval/search fit with Weaviate and FAISS experience in a product environment. Excellent availability (15-day notice).
+CAND_0030953,70,0.878949,Strong retrieval/search fit with Learning to Rank and Qdrant experience in a product environment. Excellent availability (45-day notice).
+CAND_0086151,71,0.876733,Strong recommendation-system background with Recommendation Systems and Qdrant; fits retrieval-heavy role. Good match for JD despite 120-day notice period.
+CAND_0070544,72,0.875856,Strong retrieval/search fit with Learning to Rank and OpenSearch experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0008425,73,0.875565,Strong retrieval/search fit with Learning to Rank and Qdrant experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0091254,74,0.872309,Strong retrieval/search fit with Elasticsearch experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0015065,75,0.871333,Strong retrieval/search fit with Embeddings and Qdrant experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0087364,76,0.871249,Strong retrieval/search fit with Qdrant and Milvus experience in a product environment. Excellent availability (30-day notice).
+CAND_0077337,77,0.870472,Strong retrieval/search fit with Semantic Search and pgvector experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0020350,78,0.870443,Strong retrieval/search fit with FAISS and BM25 experience in a product environment. Excellent availability (30-day notice).
+CAND_0028793,79,0.869424,Strong retrieval/search fit with Embeddings and Learning to Rank experience in a product environment. Good match for JD despite 120-day notice period.
+CAND_0075491,80,0.864923,Strong retrieval/search fit with Embeddings and Recommendation Systems experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0081053,81,0.864777,Strong retrieval/search fit with Qdrant and Learning to Rank experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0076831,82,0.864591,Strong retrieval/search fit with Milvus and BM25 experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0052706,83,0.861994,Strong retrieval/search fit with Pinecone and Information Retrieval experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0074735,84,0.861992,Strong retrieval/search fit with RAG and Weaviate experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0098846,85,0.861824,Strong retrieval/search fit with Qdrant and Recommendation Systems experience in a product environment. Excellent availability (45-day notice).
+CAND_0044222,86,0.861395,Strong retrieval/search fit with Vector Search and OpenSearch experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0061175,87,0.859071,Strong retrieval/search fit with Milvus and Recommendation Systems experience in a product environment. Good match for JD despite 120-day notice period.
+CAND_0048558,88,0.857687,Strong retrieval/search fit with Information Retrieval and OpenSearch experience in a product environment. Excellent availability (30-day notice).
+CAND_0050454,89,0.856246,Strong recommendation-system background with FAISS and Qdrant; fits retrieval-heavy role. Excellent availability (30-day notice).
+CAND_0043829,90,0.855701,Strong retrieval/search fit with Qdrant and BM25 experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0046525,91,0.855114,Strong recommendation-system background with Elasticsearch and Information Retrieval; fits retrieval-heavy role. Good match for JD despite 60-day notice period.
+CAND_0043228,92,0.852480,Strong retrieval/search fit with Vector Search and Sentence Transformers experience in a product environment. Excellent availability (30-day notice).
+CAND_0081686,93,0.852192,Strong recommendation-system background with Embeddings and FAISS; fits retrieval-heavy role. Good match for JD despite 60-day notice period.
+CAND_0006567,94,0.850998,Strong retrieval/search fit with BM25 and Ranking Systems experience in a product environment. Good match for JD despite 60-day notice period.
+CAND_0049538,95,0.850683,Strong retrieval/search fit with Learning to Rank and OpenSearch experience in a product environment. Excellent availability (30-day notice).
+CAND_0052335,96,0.847271,Strong recommendation-system background with Learning to Rank and Semantic Search; fits retrieval-heavy role. Good match for JD despite 60-day notice period.
+CAND_0094165,97,0.846660,Strong retrieval/search fit with pgvector and Semantic Search experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0044890,98,0.846528,Strong retrieval/search fit with FAISS and Recommendation Systems experience in a product environment. Good match for JD despite 90-day notice period.
+CAND_0024620,99,0.841765,Strong retrieval/search fit with Semantic Search and BM25 experience in a product environment. Excellent availability (45-day notice).
+CAND_0000422,100,0.839875,Strong retrieval/search fit with Milvus and Learning to Rank experience in a product environment. Good match for JD despite 90-day notice period.
