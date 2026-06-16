@@ -20,20 +20,23 @@ Accepts `.jsonl` (uncompressed) and `.jsonl.gz` (gzipped) input.
 ## Scoring Formula
 
 ```
-FinalScore = 0.35×SkillFit + 0.25×ProductFit + 0.20×Behavioral
-           + 0.10×ExperienceFit + 0.10×LocationNoticeFit
+FinalScore = 0.30×SkillFit + 0.15×ProductFit + 0.10×SearchInfra + 0.05×VectorSearch
+           + 0.30×Behavioral + 0.05×LocationFit + 0.05×Seniority
            − HardPenalties
 ```
+
+*(Note: A Sigmoid calibration function is applied to spread scores cleanly before tie-breaking).*
 
 ### Component Details
 
 | Component | Weight | Key Logic |
 |---|---|---|
-| **Skill Fit** | 35% | Tiered keyword scoring (see below). Also scans profile summary + headline to catch plain-language candidates who describe experience in prose. |
-| **Product Fit** | 25% | Title quality (Search/Ranking/Applied ML > generic DS/Research) + consulting career penalty via `industry` field + production shipping evidence from career descriptions. |
-| **Behavioral Signals** | 20% | 12 platform sub-signals: open-to-work, response rate, activity recency, interview completion, GitHub activity, recruiter saves, profile completeness, assessment scores, response time, active applications, verified contacts, LinkedIn. |
-| **Experience Fit** | 10% | 6–8yr sweet spot curve + **seniority modifier from title** (Lead/Staff +12%, Junior −22%). |
-| **Location + Notice** | 10% | India + Pune/Noida = 1.0; other Tier-1 India = 0.85; overseas = 0.18–0.50. Notice: ≤30d = 0.95, ≤60d = 0.55, ≥120d = 0.04. |
+| **Core Skill Fit** | 30% | Tiered keyword scoring with specific HR Tech bonus |
+| **Product Fit** | 15% | Heavy focus on deployed systems, large-scale inference, and penalizes pure consulting |
+| **Search Infra** | 10% | Rewards explicit mention of evaluation frameworks (NDCG, MRR, A/B Testing) |
+| **Vector DB** | 5% | Explicit recognition of FAISS, Milvus, Pinecone, Weaviate |
+| **Behavioral Signals** | 30% | Platform sub-signals: active recency, recruiter response rate, open-to-work, Github activity (>50), and Skill Assessments. |
+| **Location & Seniority** | 10% | Punishes job hoppers and title-chasers. Pune/Noida preferred. |
 
 ### Tiered Skill Scoring (the core differentiator)
 
@@ -70,6 +73,7 @@ Four impossibility checks catch the ~80 synthetic trap profiles:
 2. ≥3 skills marked `expert` with `duration_months = 0`
 3. `years_of_experience` > 2.8× sum of `career_history` durations
 4. ≥20 skills all at `expert` or `advanced` (keyword stuffer pattern)
+5. Impossible durations for recent tech (e.g. >3 years LangChain or >5 years Pinecone)
 
 ---
 
