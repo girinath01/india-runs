@@ -12,17 +12,16 @@ python validate_submission.py bug_hunters.csv
 ```
 
 Accepts `.jsonl` (uncompressed) and `.jsonl.gz` (gzipped) input.  
-**Runtime: ~40 seconds** for 100,000 candidates on CPU (two-pass pipeline).  
+**Runtime: ~20-40 seconds** for 100,000 candidates on CPU (two-pass pipeline).  
 **Memory: ~2–3 GB** (streams JSONL, never loads full dataset at once).
 
 ---
 
-## Scoring Formula
+## Scoring Formula (v4.0)
 
 ```
-FinalScore = 0.30×SkillFit + 0.15×ProductFit + 0.10×SearchInfra + 0.05×VectorSearch
-           + 0.30×Behavioral + 0.05×LocationFit + 0.05×Seniority
-           − HardPenalties
+FinalScore = 0.35×SearchRetrieval + 0.25×VectorSearch + 0.20×Production
+           + 0.15×NoticePeriod + 0.05×OpenToWork
 ```
 
 *(Note: A Sigmoid calibration function is applied to spread scores cleanly before tie-breaking).*
@@ -31,49 +30,17 @@ FinalScore = 0.30×SkillFit + 0.15×ProductFit + 0.10×SearchInfra + 0.05×Vecto
 
 | Component | Weight | Key Logic |
 |---|---|---|
-| **Core Skill Fit** | 30% | Tiered keyword scoring with specific HR Tech bonus |
-| **Product Fit** | 15% | Heavy focus on deployed systems, large-scale inference, and penalizes pure consulting |
-| **Search Infra** | 10% | Rewards explicit mention of evaluation frameworks (NDCG, MRR, A/B Testing) |
-| **Vector DB** | 5% | Explicit recognition of FAISS, Milvus, Pinecone, Weaviate |
-| **Behavioral Signals** | 30% | Platform sub-signals: active recency, recruiter response rate, open-to-work, Github activity (>50), and Skill Assessments. |
-| **Location & Seniority** | 10% | Punishes job hoppers and title-chasers. Pune/Noida preferred. |
+| **Search/Retrieval** | 35% | Primary hits (BM25, LTR, Information Retrieval). Penalizes generic ML profiles lacking search experience. Rewards Search/Retrieval titles. |
+| **Vector DBs** | 25% | Massive boosts for explicit Vector DBs (FAISS, Pinecone, Qdrant, Weaviate, Milvus, pgvector). |
+| **Production Experience** | 20% | Heavy focus on deployed systems, large-scale inference. Penalizes pure academic/researchers. |
+| **Notice Period** | 15% | <=15 days gets 100% of score. 16-30 days gets 90%. >90 days gets 0%. |
+| **Open To Work** | 5% | Binary metric. Missing OTW removes 5% of final score. |
 
-### Tiered Skill Scoring (the core differentiator)
-
-The JD explicitly warns: *"If your experience consists of LangChain calling OpenAI — probably not."*
-
-| Tier | Contribution | Skills |
-|---|---|---|
-| **Tier 1** | 65% of skill score | FAISS, Qdrant, Pinecone, Elasticsearch, OpenSearch, Weaviate, Milvus, RAG, retrieval, semantic search, vector search, ranking, recommendation, LTR, NDCG, A/B testing |
-| **Tier 2** | 25% of skill score | NLP, BERT, PyTorch, TensorFlow, MLOps, MLflow, Spark, Docker, Kubernetes, AWS/GCP/Azure |
-| **Tier 3** | 10% of skill score | LangChain, Prompt Engineering, QLoRA, LoRA, OpenAI, ChatGPT — trendy LLM tooling without retrieval/search context |
-| **Disqualifying** | Penalty applied | Computer Vision, Speech Recognition, Robotics, SLAM — wrong domain |
-
-### Hard Penalties
-
-Subtracted directly from the final score (caps at −0.52):
-
-| Condition | Penalty |
-|---|---|
-| Non-technical title (Marketing Manager, HR, etc.) | −0.35 |
-| Research-only career (papers, thesis, no production evidence) | −0.18 |
-| Inactive > 180 days on platform | −0.18 |
-| Junior title | −0.15 |
-| Recruiter response rate < 10% | −0.15 |
-| LLM-only skills with zero Tier-1 retrieval/search skills | −0.14 |
-| Inactive 90–180 days | −0.09 |
-| Response rate 10–20% | −0.08 |
-| Not open to work | −0.04 |
-
-### Honeypot Detection
-
-Four impossibility checks catch the ~80 synthetic trap profiles:
-
-1. `duration_months` exceeds months since `start_date` (chronologically impossible)
-2. ≥3 skills marked `expert` with `duration_months = 0`
-3. `years_of_experience` > 2.8× sum of `career_history` durations
-4. ≥20 skills all at `expert` or `advanced` (keyword stuffer pattern)
-5. Impossible durations for recent tech (e.g. >3 years LangChain or >5 years Pinecone)
+### Tie-Breakers & Modifiers
+- **Experience Sweet Spot**: 5–9 years of experience applies a 1.15x multiplier. Junior profiles (<3.5 yrs) suffer a 0.80x multiplier.
+- **Location Alignment**: Candidates in preferred locations (Pune/Noida) retain 100% of their score. Unwilling or out-of-country candidates suffer an 8.2% multiplier deduction.
+- **Recruiter Response**: Candidates with <20% response rate receive a flat -0.05 deduction at the tie-breaker stage.
+- **Honeypot Shield**: The system soft-penalizes honeypots in Pass 1 to allow them through for proper auditing, and cleanly zeroes them in Pass 2.
 
 ---
 
@@ -85,7 +52,7 @@ Four impossibility checks catch the ~80 synthetic trap profiles:
   Pass 1: Fast filter (~1s per 10K)
   Check: has any Tier-1 skill OR high-signal title
      ↓
-  Top 3,000 candidates
+  Top 5,000 candidates
      ↓
   Pass 2: Full 5-component deep scoring
      ↓
@@ -95,25 +62,6 @@ Four impossibility checks catch the ~80 synthetic trap profiles:
 ```
 
 This keeps runtime under 60 seconds on CPU, well within the 5-minute limit.
-
----
-
-## Key Design Decisions
-
-**Why tiered skills instead of flat keyword matching?**  
-The JD says retrieval/search/ranking systems are the core requirement, and explicitly warns that LLM-tooling-only candidates are not a fit. Tier 1 skills get 6.5× the weight of Tier 3.
-
-**Why a separate ProductFit component?**  
-Two candidates with identical skills can have very different fit: one shipped a recommendation engine at Swiggy (product company), the other maintained integration tests at TCS (IT services). This needed its own signal.
-
-**Why use the `industry` field for consulting detection?**  
-Many consulting companies operate under subsidiary names not in any fixed list. The `industry` field ("IT Services", "Consulting", etc.) is a schema-level field — more reliable than name-matching.
-
-**Why scan profile summary and headline?**  
-The JD describes a "Tier 5" candidate who built a retrieval system at a product company but doesn't use buzzwords in their skill list. Scanning free-text catches these candidates that skill-only systems miss.
-
-**Why are behavioral signals weighted at 20%?**  
-From the JD: *"A perfect-on-paper candidate who hasn't logged in for 6 months and has a 5% recruiter response rate is, for hiring purposes, not actually available."*
 
 ---
 
