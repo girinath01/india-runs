@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Redrob Hackathon — Candidate Ranker v3.1  (Bug Hunters — LOGICAL FIXES v2)
+Redrob Hackathon - Candidate Ranker v3.4  (Bug Hunters - LOGICAL FIXES v5)
 JD: Senior AI Engineer — Founding Team @ Redrob AI
 
-Scoring formula (MATCHES CODE — docstring was wrong in v2):
-  raw   = 0.30*core_skill + 0.15*production + 0.10*search_infra
-          + 0.05*vector + 0.05*seniority + 0.30*behavioral + 0.05*location
+Scoring formula (MATCHES CODE):
+raw = 0.35 * search_retrieval
+    + 0.25 * vector_search
+    + 0.20 * production
+    + 0.15 * notice_period
+    + 0.05 * open_to_work
   final = sigmoid(clamp(raw * experience_mult + tie_break - penalties))
 
 Design principles:
@@ -160,10 +164,12 @@ TIER3_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(TIER3_SKILLS,
 DISQ_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(DISQUALIFYING_SKILLS, key=len, reverse=True))) + r')\b')
 
 # [H1] Module-level compiled regexes for deep_score (avoids 18K re-compilations in Pass 2)
-CORE_TEXT_RE = re.compile(r'\b(learning to rank|ltr|lambdamart|bm25|elasticsearch|opensearch|information retrieval|recommendation system|ranking system)\b')
+PRIMARY_CORE_RE = re.compile(r'\b(information retrieval|learning to rank|ltr|lambdamart|bm25|semantic search|candidate matching|search quality)\b')
+SECONDARY_CORE_RE = re.compile(r'\b(ranking system|recommendation system|candidate ranking|personalization|relevance|matching engine|elasticsearch|opensearch)\b')
+EXPLICIT_VECTOR_RE = re.compile(r'\b(faiss|pinecone|qdrant|weaviate|milvus|pgvector)\b')
+VECTOR_TEXT_RE = re.compile(r'\b(vector search|vector database|chroma|ann|hnsw)\b')
 HR_TEXT_RE = re.compile(r'\b(hr tech|recruiting tech|talent acquisition platform|marketplace product|job board)\b')
 PROD_TEXT_RE = re.compile(r'\b(scale|shipped|deployed|productionized|enterprise|latency|qps|inference optimization|tensorrt|vllm|distributed systems|ray|spark)\b')
-VECTOR_TEXT_RE = re.compile(r'\b(faiss|milvus|pinecone|weaviate|pgvector|vector search|qdrant)\b')
 INFRA_TEXT_RE = re.compile(r'\b(search infra|retrieval pipeline|relevance|indexing|ranking optimization)\b')
 EVAL_TEXT_RE = re.compile(r'\b(ndcg|mrr|mean average precision|a/b test|ab testing|offline evaluation|online evaluation)\b')
 RAG_WORD_RE = re.compile(r'\brag\b')
@@ -238,7 +244,8 @@ def parse_date(s: str) -> date | None:
     """Try common date formats; return None on failure."""
     if not s:
         return None
-    for fmt in ("%Y-%m-%d", "%Y-%m", "%Y/%m/%d", "%d-%m-%Y", "%Y"):
+    s = s.replace("/", "-")
+    for fmt in ("%Y-%m-%d", "%Y-%m", "%d-%m-%Y", "%Y"):
         try:
             return datetime.strptime(s[:10].strip(), fmt).date()
         except ValueError:
@@ -276,11 +283,7 @@ def is_honeypot(candidate: dict) -> bool:
     if expert_zero >= 3:
         return True
 
-    # 3. Claimed YOE >> sum of career history (fabricated experience)
-    claimed = float(profile.get("years_of_experience", 0) or 0)
-    actual  = sum(int(j.get("duration_months", 0) or 0) for j in career) / 12.0
-    if claimed > 3 and actual > 0 and claimed > actual * 2.8:
-        return True
+    # (Rule 3 removed: Claimed YOE vs career history is now a penalty, not disqualification)
 
     # 4. Keyword stuffer: 20+ expert skills but lacks duration/endorsement or has domain conflicts
     expert_advanced = [s for s in skills if s.get("proficiency") in ("expert", "advanced")]
@@ -296,6 +299,7 @@ def is_honeypot(candidate: dict) -> bool:
             return True
 
     # 5. Any single job > 20 yrs but candidate claims < 10 yrs total
+    claimed = float(profile.get("years_of_experience", 0) or 0)
     if 0 < claimed < 10 and any(int(j.get("duration_months", 0) or 0) > 240 for j in career):
         return True
 
@@ -317,24 +321,21 @@ def is_honeypot(candidate: dict) -> bool:
 def fast_score(candidate: dict) -> float:
     """
     Lightweight score: only checks title, top-level skill list, and key text signals.
-    No deep career analysis. Must process ≥10K candidates/second on a single core.
-    Returns -100 for clear disqualifications (honeypots, wrong-domain titles).
+    No deep career analysis. Must process >=10K candidates/second on a single core.
     """
-    if is_honeypot(candidate):
-        return -100.0
-
     profile = candidate.get("profile", {}) or {}
     skills  = candidate.get("skills", []) or []
     career  = candidate.get("career_history", []) or []
     title   = profile.get("current_title", "").lower()
 
-    # Instant out: non-technical title
+    # Soft out: non-technical title penalty
+    score_penalty = 0.0
     if any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
-        return -100.0
+        score_penalty = 20.0
 
     t1_count = t2_count = 0
     for s in skills:
-        name = s.get("name", "").lower().strip()
+        name = re.sub(r"[-_/]", " ", s.get("name", "").lower()).strip()
         if len(name) < 3:          # [B3] skip single/double chars to avoid false positives
             continue
         if TIER1_REGEX.search(name):
@@ -347,7 +348,7 @@ def fast_score(candidate: dict) -> float:
     # Scan headline + summary + career descriptions for JD concepts
     headline = profile.get("headline", "") or ""
     summary  = profile.get("summary", "")  or ""
-    career_desc = " ".join(j.get("description", "") or "" for j in career)
+    career_desc = " ".join(j.get("description", "") or "" for j in career[:3])[:4000]
     combined = (headline + " " + summary + " " + career_desc).lower()
 
     # "information retrieval" is covered by "retrieval", so we can use single-word tokens
@@ -368,7 +369,7 @@ def fast_score(candidate: dict) -> float:
     if title_hit:  score += 4.0
     if text_hit:   score += 1.0
     score += min(ship_hits * 0.5, 2.0)  # Up to +2.0 for shipping evidence
-    return score
+    return score - score_penalty
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -386,7 +387,7 @@ def score_skill_fit(skills: list, extra_text: str = "", career: list | None = No
     t1_w = t2_w = t3_w = disq_w = total_w = 0.0
 
     for skill in skills:
-        name  = skill.get("name", "").lower().strip()
+        name  = re.sub(r"[-_/]", " ", skill.get("name", "").lower()).strip()
         if len(name) < 3:          # [B3] guard against single-char false positives
             continue
         prof  = PROFICIENCY_WEIGHTS.get(skill.get("proficiency", "beginner"), 0.15)
@@ -411,29 +412,13 @@ def score_skill_fit(skills: list, extra_text: str = "", career: list | None = No
         if DISQ_REGEX.search(name):
             disq_w += weight
 
-    # Bonus: scan career descriptions for JD concept areas
-    # This catches plain-language Tier-5 candidates who don't use buzzwords in skill names
-    career_text = " ".join(j.get("description", "") or "" for j in career)
-    full_text   = (extra_text + " " + career_text).lower()
-    text_bonus  = 0.0
-    if full_text:
-        checks = [
-            any(kw in full_text for kw in ("retrieval", "semantic search", "dense retrieval", "information retrieval")),
-            any(kw in full_text for kw in ("vector", "faiss", "pinecone", "qdrant", "elasticsearch", "opensearch", "milvus", "weaviate")),
-            any(kw in full_text for kw in ("ranking", "recommendation", "recommender", "learning to rank")),
-            any(kw in full_text for kw in ("search engine", "search system", "search platform")),
-            any(kw in full_text for kw in ("a/b test", "ndcg", "mrr", "offline eval", "evaluation framework", "map")),
-            any(kw in full_text for kw in ("embedding", "sentence-transformer", "bi-encoder", "cross-encoder")),
-        ]
-        text_bonus = sum(checks) / len(checks) * 0.35
-
     tw      = total_w if total_w > 0 else 1.0
     t1_norm = clamp(t1_w / tw)
     t2_norm = clamp(t2_w / tw * 0.55)
     t3_norm = clamp(t3_w / tw * 0.15)   # LangChain-only gets almost nothing
     disq_frac = clamp(disq_w / tw)
 
-    raw = clamp(t1_norm * 0.65 + t2_norm * 0.25 + t3_norm * 0.10 + text_bonus)
+    raw = clamp(t1_norm * 0.65 + t2_norm * 0.25 + t3_norm * 0.10)
 
     # Domain disqualification penalty
     if disq_frac > 0.60:
@@ -516,7 +501,7 @@ def score_product_fit(profile: dict, career: list) -> tuple[float, float, float]
 
 def score_behavioral(signals: dict, notice: int) -> float:
     """
-    Availability & engagement scoring  (weight: 0.35 of final — highest weight).
+    Availability & engagement scoring  (weight: 0.20 of final).
     JD: "inactive candidate = effectively unavailable; down-weight aggressively."
 
     [B10] Added clamp() on return value (raw could exceed 1.0 with high saves).
@@ -585,32 +570,27 @@ def score_behavioral(signals: dict, notice: int) -> float:
     ])
     verify_bonus = 0.02 * (verified_count / 3.0)
 
-    raw = (
+    base_score = (
         0.25 * otw
       + 0.25 * active_score
       + 0.20 * rr
       + 0.10 * notice_score
       + 0.10 * ic
       + 0.10 * saves_score
-      + gh_bonus
-      + assess_bonus
-      + comp_bonus
-      + resp_bonus
-      + apps_bonus
-      + views_bonus
-      + verify_bonus
     )
-    return clamp(raw)   # [B10] always clamp
+    bonuses = gh_bonus + assess_bonus + comp_bonus + resp_bonus + apps_bonus + views_bonus + verify_bonus
+    raw = base_score * 0.85 + bonuses
+    return min(1.0, raw)   # [B10] always clamp
 
 
 def score_experience_fit(profile: dict) -> float:
     """Requested multiplicative modifiers for experience."""
     years = float(profile.get("years_of_experience", 0) or 0)
-    if years < 3.5:   return 0.90
-    elif years < 5:   return 1.02
-    elif years <= 9:  return 1.05
-    elif years <= 12: return 1.00
-    else:             return 0.97
+    if years < 3.5:   return 0.80
+    elif years < 5:   return 0.95
+    elif years <= 9:  return 1.15
+    elif years <= 12: return 1.05
+    else:             return 0.90
 
 
 def score_location(profile: dict, signals: dict) -> float:
@@ -643,6 +623,12 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
 
     if any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
         penalty += 0.35   # completely wrong field
+
+    # [C6] Fabricated Experience Penalty (moved from honeypot disqualification)
+    claimed = float(profile.get("years_of_experience", 0) or 0)
+    actual  = sum(int(j.get("duration_months", 0) or 0) for j in career) / 12.0
+    if claimed > 3 and actual > 0 and claimed > actual * 2.8:
+        penalty += 0.20
 
     if any(p in title for p in ("junior", "jr.", "intern", "trainee")) and "senior" not in title:
         penalty += 0.15   # JD needs 5-9 yr seniority
@@ -733,7 +719,7 @@ def _categorise_skill(skill_name: str) -> str | None:
     Priority: RANKING > SEARCH > VECTOR > SEMANTIC > RAG
     This ensures BM25 always maps to SEARCH, not mistakenly to VECTOR.
     """
-    s = skill_name.lower()
+    s = re.sub(r"[-_/]", " ", skill_name.lower()).strip()
     if any(kw in s for kw in SKILL_RANKING):
         return "RANKING"
     if any(kw in s for kw in SKILL_SEARCH):
@@ -793,7 +779,7 @@ def generate_reasoning(features: dict, profile: dict, career: list, skills: list
     strengths = []
     if tier1_found:
         strengths.append(f"production experience with {', '.join(tier1_found[:3])}, matching JD's core retrieval/ranking requirement")
-    elif features.get("core_skill", 0) >= 0.4:
+    elif features.get("search_retrieval", 0) >= 0.4:
         strengths.append("solid search/ranking background relevant to JD's retrieval focus")
     if features.get("production", 0) >= 0.5:
         strengths.append("evidence of shipping ML systems at scale (JD's 'shipper > researcher' criterion)")
@@ -806,7 +792,7 @@ def generate_reasoning(features: dict, profile: dict, career: list, skills: list
 
     # ── Build concerns list (honest, specific) ──────────────────────────────
     concerns = []
-    if features.get("core_skill", 0) < 0.3:
+    if features.get("search_retrieval", 0) < 0.3:
         concerns.append("limited retrieval/search production experience")
     if features.get("vector_search", 0) == 0:
         concerns.append("no explicit vector DB evidence in profile")
@@ -896,16 +882,23 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     # STAGE 1: Feature Extraction
     # ==========================================
     features = {}
-    career_desc = " ".join(j.get("description", "") or "" for j in career).lower()
+    career_desc = " ".join(j.get("description", "") or "" for j in career[:3]).lower()[:4000]
     full_text = extra_text.lower() + " " + career_desc
 
-    # 1. Core Skill — LTR, RecSys, IR, BM25, OpenSearch, Ranking
-    features["core_skill"] = skill_fit
-    core_hits = len(set(CORE_TEXT_RE.findall(full_text)))
-    hr_hits = 1 if HR_TEXT_RE.search(full_text) else 0
-    features["core_skill"] = min(1.0, features["core_skill"] + (core_hits * 0.05) + (hr_hits * 0.05))
+    # 1. Search/Retrieval Expertise (35%)
+    primary_hits = len(set(PRIMARY_CORE_RE.findall(full_text)))
+    secondary_hits = len(set(SECONDARY_CORE_RE.findall(full_text)))
+    
+    title_lower = profile.get("job_title", "").lower()
+    title_bonus = 0.2 if any(kw in title_lower for kw in ("search engineer", "retrieval engineer", "recommendation engineer", "relevance engineer")) else 0.0
+    
+    generic_ml = any(kw in title_lower for kw in ("data scientist", "machine learning", "ml engineer", "data engineer"))
+    generic_penalty = 0.3 if generic_ml and primary_hits == 0 and len(set(EXPLICIT_VECTOR_RE.findall(full_text))) == 0 else 0.0
+    
+    sr_score = skill_fit + (primary_hits * 0.30) + (secondary_hits * 0.15) + title_bonus - generic_penalty
+    features["search_retrieval"] = min(1.0, max(0.0, sr_score))
 
-    # 2. Production Experience — Scale, shipped, enterprise
+    # 2. Production Experience (20%)
     is_research = any(kw in full_text for kw in ("research", "academic", "paper", "publication", "thesis"))
     prod_hits = len(set(PROD_TEXT_RE.findall(full_text)))
     features["production"] = product_fit
@@ -913,82 +906,56 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     if is_research and prod_hits == 0:
         features["production"] = max(0.0, features["production"] - 0.20)
 
-    # 3. Vector Search Expertise — FAISS, Milvus, Pinecone, Weaviate, pgvector
+    # 3. Vector DB Expertise (25%)
     vector_hits = len(set(VECTOR_TEXT_RE.findall(full_text)))
-    features["vector_search"] = min(1.0, vector_hits * 0.25)
+    explicit_hits = len(set(EXPLICIT_VECTOR_RE.findall(full_text)))
+    features["vector_search"] = min(1.0, (explicit_hits * 0.40) + (vector_hits * 0.15))
 
-    # 4. Search Infrastructure Depth — Pipelines, relevance, indexing
-    infra_hits = len(set(INFRA_TEXT_RE.findall(full_text)))
-    title = (profile.get("current_title", "") or "").lower()
-    features["search_infra"] = 0.0  # Evidence-based only, no free baseline
-    if "search engineer" in title or "recommendation systems engineer" in title:
-        features["search_infra"] = 1.0
-    elif "applied ml engineer" in title or "senior ml engineer" in title:
-        features["search_infra"] = 0.7
-    eval_hits = len(set(EVAL_TEXT_RE.findall(full_text)))
-    features["search_infra"] = min(1.0, features["search_infra"] + (infra_hits * 0.15) + (eval_hits * 0.10))
+    # 4. Notice Period (15%)
+    notice = int(signals.get("notice_period_days", 60) or 60)
+    if notice <= 15:       notice_score = 1.00
+    elif notice <= 30:     notice_score = 0.90
+    elif notice <= 60:     notice_score = 0.40
+    elif notice <= 90:     notice_score = 0.10
+    else:                  notice_score = 0.00
+    features["notice_period"] = notice_score
 
-    # 5. Availability (10%)
-    if notice <= 15: features["availability"] = 1.0
-    elif notice <= 30: features["availability"] = 0.9
-    elif notice <= 60: features["availability"] = 0.7
-    elif notice <= 90: features["availability"] = 0.4
-    else: features["availability"] = 0.1
-
-    # 6. Seniority / Ownership (5%)
-    years = float(profile.get("years_of_experience", 0) or 0)
-    features["seniority"] = min(years / 10.0, 1.0)
-    owner_kw = ["led", "architected", "owned", "designed"]
-    if any(kw in full_text for kw in owner_kw):
-        features["seniority"] = min(1.0, features["seniority"] + 0.1)
-    if behavioral > 0.8: 
-        features["seniority"] = min(1.0, features["seniority"] + 0.1)
+    # 5. Open to Work (5%)
+    otw = 1.0 if signals.get("open_to_work_flag", False) else 0.0
+    features["open_to_work"] = otw
 
     # ==========================================
     # STAGE 2: Weighted Linear Scoring
     # ==========================================
     raw_score = (
-        0.30 * features["core_skill"] +
-        0.15 * features["production"] +
-        0.10 * features["search_infra"] +
-        0.05 * features["vector_search"] +
-        0.05 * features["seniority"] +
-        0.30 * behavioral +
-        0.05 * loc_sc
+        0.35 * features["search_retrieval"] +
+        0.25 * features["vector_search"] +
+        0.20 * features["production"] +
+        0.15 * features["notice_period"] +
+        0.05 * features["open_to_work"]
     )
 
     # [C1/C3] Apply experience fit as multiplier (JD sweet spot: 5-9 years)
     exp_mult = score_experience_fit(profile)
     raw_score *= exp_mult
+    raw_score *= (0.90 + 0.10 * loc_sc)
 
     # ==========================================
     # STAGE 3: Penalties & Tie Breakers
     # ==========================================
     rr = float(signals.get("recruiter_response_rate", 0) or 0)
-    otw = 1.0 if signals.get("open_to_work_flag", False) else 0.0
+    rr_penalty = 0.05 if rr < 0.20 else 0.0
+    
     last_dt = parse_date(signals.get("last_active_date", ""))
     recent_activity = 1.0
     if last_dt:
         days = (TODAY - last_dt).days
         recent_activity = max(0.0, 1.0 - (days / 180.0))
         
-    cat_tie = 0.0
-    if "learning to rank" in full_text or "bm25" in full_text or "ranking system" in full_text:
-        cat_tie += 0.005
-    if "recommendation" in full_text or "recommender" in full_text:
-        cat_tie += 0.004
-    if "search infra" in full_text or "search system" in full_text or "opensearch" in full_text:
-        cat_tie += 0.003
-    if "semantic search" in full_text:
-        cat_tie += 0.002
-    if RAG_WORD_RE.search(full_text):  # [H4] word-boundary match, not substring
-        cat_tie += 0.001
-
-    # [H2] Include availability as tie-breaker (was computed but unused)
-    avail_tie = 0.005 * features.get("availability", 0.5)
-    tie_break = (0.01 * rr) + (0.005 * recent_activity) + (0.005 * otw) + cat_tie + avail_tie
+    cat_tie = 0.001 * (primary_hits + explicit_hits)
+    tie_break = (0.01 * rr) + (0.005 * recent_activity) + cat_tie + (0.01 * behavioral)
     
-    penalized_score = max(0.0, raw_score + tie_break - penalties)
+    penalized_score = max(0.0, raw_score + tie_break - penalties - rr_penalty)
     
     # ==========================================
     # STAGE 4: Non-Linear Calibration (Sigmoid)
@@ -1051,32 +1018,26 @@ def iter_candidates(input_path: str):
 # TWO-PASS RANKING PIPELINE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def rank_candidates(input_path: str, output_path: str, top_k: int = 3000) -> None:
+def rank_candidates(input_path: str, output_path: str, top_k: int = 5000) -> None:
     """
-    Pass 1: Stream all 100 K → fast_score → keep top {top_k}
-    Pass 2: deep_score on top {top_k} → select top 100
+    Pass 1: Stream all 100 K -> fast_score -> keep top {top_k}
+    Pass 2: deep_score on top {top_k} -> select top 100
     """
     t0 = time.time()
-    print(f"[Ranker v2.1]  Input : {input_path}")
-    print(f"[Ranker v2.1]  Output: {output_path}")
-    print(f"[Ranker v2.1]  TODAY : {TODAY}")
+    print(f"[Ranker v4.0]  Input : {input_path}")
+    print(f"[Ranker v4.0]  Output: {output_path}")
+    print(f"[Ranker v4.0]  TODAY : {TODAY}\n")
 
     # ── PASS 1 ────────────────────────────────────────────────────────────────
     print(f"\n[Pass 1] Fast filtering (streaming)...")
     fast_pool: list[tuple[float, str, dict]] = []
     total = 0
-    hp_pass1 = 0
-
     for candidate in iter_candidates(input_path):
         cid = candidate.get("candidate_id", "")
         if not cid:
             continue
         fs = fast_score(candidate)
         total += 1
-
-        if fs <= -100.0:
-            hp_pass1 += 1
-            continue  # [M1] Don't store honeypots/disqualified — saves memory
 
         fast_pool.append((fs, cid, candidate))
         if total % 10_000 == 0:
@@ -1086,7 +1047,7 @@ def rank_candidates(input_path: str, output_path: str, top_k: int = 3000) -> Non
     print(f"[Pass 1] Done: {total:,} candidates scanned in {time.time()-t0:.1f}s")
     fast_pool.sort(key=lambda x: -x[0])
     pool = fast_pool[:top_k]
-    print(f"[Pass 1] {hp_pass1} honeypots / disqualified; top {len(pool)} passed to Pass 2")
+    print(f"[Pass 1] top {len(pool)} passed to Pass 2")
 
     # ── PASS 2 ────────────────────────────────────────────────────────────────
     print(f"\n[Pass 2] Deep scoring top {len(pool)} candidates...")
@@ -1144,8 +1105,8 @@ def main() -> None:
     if sys.platform == 'win32':
         sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(
-        description="Bug Hunters — Redrob Hackathon Ranker v2.1 (Fixed)\n"
-                    "Two-pass: 100K stream → fast filter → 3K → deep score → CSV",
+        description="Bug Hunters - Redrob Hackathon Ranker v3.4 (Fixed)\n"
+                    "Two-pass: 100K stream -> fast filter -> 5K -> deep score -> CSV",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--candidates", required=True,
