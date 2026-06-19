@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Validate submission CSV per challenge rules (sections 2-3).
-Copied from official hackathon bundle validate_submission.py
-Row 1 = header. Rows 2-101 = exactly 100 data rows. CSV only.
+Validate submission CSV per challenge rules (sections 2–3).
+Row 1 = header. Rows 2–101 = exactly 100 data rows. CSV only.
 """
 
 import csv
@@ -35,6 +34,7 @@ def validate_submission(csv_path):
                 errors.append("Row 1 must be the header row; file is empty.")
                 return errors
 
+            # Row 1: column names and their order come from this line only
             if header != REQUIRED_HEADER:
                 errors.append(
                     "Row 1 (header) must be exactly:\n"
@@ -59,7 +59,7 @@ def validate_submission(csv_path):
     if n != EXPECTED_DATA_ROWS:
         errors.append(
             f"After the header (row 1), there must be exactly {EXPECTED_DATA_ROWS} "
-            f"data rows (rows {DATA_ROW_START}-{DATA_ROW_START + EXPECTED_DATA_ROWS - 1}); "
+            f"data rows (rows {DATA_ROW_START}–{DATA_ROW_START + EXPECTED_DATA_ROWS - 1}); "
             f"found {n}."
         )
 
@@ -85,7 +85,9 @@ def validate_submission(csv_path):
         if not cid:
             errors.append(f"Row {row_num}: candidate_id is required.")
         elif not CANDIDATE_ID_PATTERN.match(cid):
-            errors.append(f"Row {row_num}: candidate_id must be CAND_XXXXXXX (7 digits).")
+            errors.append(
+                f"Row {row_num}: candidate_id must be CAND_XXXXXXX (7 digits)."
+            )
         elif cid in seen_ids:
             errors.append(f"Row {row_num}: duplicate candidate_id '{cid}'.")
         else:
@@ -102,7 +104,7 @@ def validate_submission(csv_path):
             else:
                 seen_ranks.add(rank)
         except ValueError:
-            errors.append(f"Row {row_num}: rank must be an integer (1-100).")
+            errors.append(f"Row {row_num}: rank must be an integer (1–100).")
             rank = None
 
         try:
@@ -117,7 +119,7 @@ def validate_submission(csv_path):
     missing = set(range(1, 101)) - seen_ranks
     if missing:
         errors.append(
-            f"Each rank 1-100 must appear exactly once; missing: {sorted(missing)}"
+            f"Each rank 1–100 must appear exactly once; missing: {sorted(missing)}"
         )
 
     by_rank.sort(key=lambda x: x[0])
