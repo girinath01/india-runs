@@ -17,7 +17,7 @@ Design principles:
   1. Retrieval/Search/Ranking/VectorDB skills >> trendy LLM tooling  (JD warns about this)
   2. Shippers > Researchers -- production deployment evidence is first-class signal
   3. Behavioral availability is 35%: inactive candidate = effectively unavailable (JD explicit)
-  4. Two-pass: 100K -> fast filter (threshold >= 1.5) -> deep score -> 100
+  4. Two-pass: 100K -> fast filter (top 500) -> deep score -> 100
   5. No external deps -- pure stdlib -> zero import errors in sandboxed grading env
 
 FIXED BUGS vs v2 (see CHANGELOG at bottom):
@@ -1056,10 +1056,9 @@ def rank_candidates(input_path: str, output_path: str) -> None:
 
     print(f"[Pass 1] Done: {total:,} candidates scanned in {time.time()-t0:.1f}s")
     fast_pool.sort(key=lambda x: -x[0])
-    # Pass candidates with meaningful relevance signal to deep scoring
-    # >= 1.5 requires at least one Tier1 skill OR a relevant title + text evidence
-    pool = [(s, cid, c) for s, cid, c in fast_pool if s >= 1.5]
-    print(f"[Pass 1] {len(pool)} candidates above threshold (>= 1.5) passed to Pass 2 (dropped {total - len(pool)})")
+    # Pass top 500 candidates to deep scoring
+    pool = [(s, cid, c) for s, cid, c in fast_pool][:500]
+    print(f"[Pass 1] Top {len(pool)} candidates passed to Pass 2 (dropped {total - len(pool)})")
 
     # ── PASS 2 ────────────────────────────────────────────────────────────────
     print(f"\n[Pass 2] Deep scoring top {len(pool)} candidates...")
@@ -1118,7 +1117,7 @@ def main() -> None:
         sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(
         description="Bug Hunters - Redrob Hackathon Ranker v4.1\n"
-                    "Two-pass: 100K stream -> fast filter (threshold >= 1.5) -> deep score -> CSV",
+                    "Two-pass: 100K stream -> fast filter (top 500) -> deep score -> CSV",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--candidates", required=True,
