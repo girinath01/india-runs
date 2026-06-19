@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Redrob Hackathon - Candidate Ranker v3.4  (Bug Hunters - LOGICAL FIXES v5)
-JD: Senior AI Engineer — Founding Team @ Redrob AI
+Redrob Hackathon - Candidate Ranker v4.1  (Bug Hunters)
+JD: Senior AI Engineer -- Founding Team @ Redrob AI
 
 Scoring formula (MATCHES CODE):
-raw = 0.35 * search_retrieval
-    + 0.25 * vector_search
-    + 0.20 * production
+raw = 0.30 * search_retrieval
+    + 0.20 * vector_search
+    + 0.15 * production
+    + 0.15 * behavioral
     + 0.15 * notice_period
     + 0.05 * open_to_work
   final = sigmoid(clamp(raw * experience_mult + tie_break - penalties))
 
 Design principles:
   1. Retrieval/Search/Ranking/VectorDB skills >> trendy LLM tooling  (JD warns about this)
-  2. Shippers > Researchers — production deployment evidence is first-class signal
+  2. Shippers > Researchers -- production deployment evidence is first-class signal
   3. Behavioral availability is 35%: inactive candidate = effectively unavailable (JD explicit)
-  4. Two-pass: 100K → fast filter → 3000 → deep score → 100
-  5. No external deps — pure stdlib → zero import errors in sandboxed grading env
+  4. Two-pass: 100K -> fast filter (threshold >= 1.5) -> deep score -> 100
+  5. No external deps -- pure stdlib -> zero import errors in sandboxed grading env
 
 FIXED BUGS vs v2 (see CHANGELOG at bottom):
   [B1] Double `notice` variable with different defaults (60 vs 0) in deep_score → single source
@@ -43,6 +44,7 @@ import gzip
 import argparse
 import sys
 import time
+import math
 from datetime import datetime, date
 from pathlib import Path
 
@@ -172,7 +174,6 @@ HR_TEXT_RE = re.compile(r'\b(hr tech|recruiting tech|talent acquisition platform
 PROD_TEXT_RE = re.compile(r'\b(scale|shipped|deployed|productionized|enterprise|latency|qps|inference optimization|tensorrt|vllm|distributed systems|ray|spark)\b')
 INFRA_TEXT_RE = re.compile(r'\b(search infra|retrieval pipeline|relevance|indexing|ranking optimization)\b')
 EVAL_TEXT_RE = re.compile(r'\b(ndcg|mrr|mean average precision|a/b test|ab testing|offline evaluation|online evaluation)\b')
-RAG_WORD_RE = re.compile(r'\brag\b')
 
 CONSULTING_INDUSTRIES = frozenset({
     "it services", "it consulting", "consulting",
@@ -499,18 +500,13 @@ def score_product_fit(profile: dict, career: list) -> tuple[float, float, float]
     return clamp(raw), consult_frac, prod_ratio
 
 
-def score_behavioral(signals: dict, notice: int) -> float:
+def score_behavioral(signals: dict) -> float:
     """
-    Availability & engagement scoring  (weight: 0.20 of final).
+    Availability & engagement scoring  (weight: 0.15 of final).
     JD: "inactive candidate = effectively unavailable; down-weight aggressively."
-
-    [B10] Added clamp() on return value (raw could exceed 1.0 with high saves).
     """
-    # 1. Open to work
-    otw = 1.0 if signals.get("open_to_work_flag", False) else 0.0
-
-    # 2. Last active recency
-    active_score = 0.5   # neutral default if missing
+    # 1. Last active recency
+    active_score = 0.5
     last_dt = parse_date(signals.get("last_active_date", ""))
     if last_dt:
         days = (TODAY - last_dt).days
@@ -520,29 +516,35 @@ def score_behavioral(signals: dict, notice: int) -> float:
         elif days <= 30: active_score = 0.20
         elif days <= 60: active_score = 0.10
         elif days <= 90: active_score = 0.05
-        else:            active_score = 0.00  # >90 days = not actively looking
+        else:            active_score = 0.00
 
-    # 3. Recruiter response rate
+    # 2. Recruiter response rate
     rr = clamp(float(signals.get("recruiter_response_rate", 0.0) or 0.0))
 
-    # 4. Interview completion
+    # 3. Interview completion
     ic = clamp(float(signals.get("interview_completion_rate", 0.0) or 0.0))
 
-    # 5. Notice period
-    if   notice <= 15: notice_score = 1.00
-    elif notice <= 30: notice_score = 0.80
-    elif notice <= 45: notice_score = 0.50
-    elif notice <= 60: notice_score = 0.20
-    else:              notice_score = 0.00
-
-    # 6. Recruiter saves (demand signal)
+    # 4. Recruiter saves (demand signal)
     saves = int(signals.get("saved_by_recruiters_30d", 0) or 0)
     saves_score = clamp(saves / 5.0)    # 5+ saves → 1.0
 
-    # 7. Bonus Signals
+    # 5. Offer acceptance rate
+    oar = float(signals.get("offer_acceptance_rate", -1) or -1)
+    oar_score = clamp(oar) if oar >= 0 else 0.5
+
+    # 6. Search appearance (market demand)
+    search_app = int(signals.get("search_appearance_30d", 0) or 0)
+    search_score = clamp(search_app / 10.0)
+
+    # 7. Connection count
+    connections = int(signals.get("connection_count", 0) or 0)
+    conn_score = clamp(connections / 500.0)
+
+    # 8. GitHub activity
     github = int(signals.get("github_activity_score", 0) or 0)
-    gh_bonus = 0.05 if github > 50 else 0.0
-    
+    gh_score = clamp(github / 80.0)
+
+    # 9. Bonus signals
     assessments = signals.get("skill_assessment_scores", {}) or {}
     assess_bonus = 0.0
     for k, v in assessments.items():
@@ -550,9 +552,8 @@ def score_behavioral(signals: dict, notice: int) -> float:
             if int(v or 0) > 85:
                 assess_bonus = 0.05
 
-    # [C2] Previously unused behavioral signals (10 of 23 were ignored)
     profile_comp = float(signals.get("profile_completeness_score", 50) or 50) / 100.0
-    comp_bonus = 0.03 * profile_comp  # 0-0.03: complete profiles signal seriousness
+    comp_bonus = 0.03 * profile_comp
 
     resp_time = float(signals.get("avg_response_time_hours", 48) or 48)
     resp_bonus = 0.03 if resp_time <= 4 else 0.02 if resp_time <= 12 else 0.0
@@ -571,16 +572,18 @@ def score_behavioral(signals: dict, notice: int) -> float:
     verify_bonus = 0.02 * (verified_count / 3.0)
 
     base_score = (
-        0.25 * otw
-      + 0.25 * active_score
-      + 0.20 * rr
-      + 0.10 * notice_score
-      + 0.10 * ic
+        0.30 * active_score
+      + 0.25 * rr
+      + 0.15 * ic
       + 0.10 * saves_score
+      + 0.08 * oar_score
+      + 0.05 * search_score
+      + 0.04 * conn_score
+      + 0.03 * gh_score
     )
-    bonuses = gh_bonus + assess_bonus + comp_bonus + resp_bonus + apps_bonus + views_bonus + verify_bonus
+    bonuses = assess_bonus + comp_bonus + resp_bonus + apps_bonus + views_bonus + verify_bonus
     raw = base_score * 0.85 + bonuses
-    return min(1.0, raw)   # [B10] always clamp
+    return min(1.0, raw)
 
 
 def score_experience_fit(profile: dict) -> float:
@@ -829,7 +832,12 @@ def generate_reasoning(features: dict, profile: dict, career: list, skills: list
         if concerns:
             parts.append("Gaps: " + "; ".join(concerns[:2]) + ".")
         else:
-            parts.append("Partial match to JD's retrieval/ranking focus.")
+            options = [
+                "Partial match to JD's retrieval/ranking focus.",
+                "Meets baseline technical requirements but lacks standout retrieval experience.",
+                "Adequate profile, though deeper search infrastructure exposure would be ideal."
+            ]
+            parts.append(options[int(penalized_score * 100) % 3])
     else:
         # Weak — honest about poor fit
         parts = [header + "."]
@@ -838,7 +846,12 @@ def generate_reasoning(features: dict, profile: dict, career: list, skills: list
         if strengths:
             parts.append("However, " + strengths[0] + ".")
         else:
-            parts.append("Limited alignment with JD's core retrieval/ranking requirements.")
+            options = [
+                "Limited alignment with JD's core retrieval/ranking requirements.",
+                "Profile does not clearly demonstrate the specialized search skills requested.",
+                "Lacks the specific production ranking/vector DB experience for this role."
+            ]
+            parts.append(options[int(penalized_score * 100) % 3])
 
     if notice <= 30 and otw:
         parts.append(f"Available within {notice} days.")
@@ -868,13 +881,13 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
             "(impossible tenure, inflated experience, or expert/zero-duration skills)."
         ), {"DEFAULT"}
 
-    # [B1] FIXED: single source of truth for notice — one variable, one default
-    notice = int(signals.get("notice_period_days", 30) or 30)
+    # [B1] FIXED: single source of truth for notice — default 60 (conservative)
+    notice = int(signals.get("notice_period_days", 60) or 60)
 
     extra_text  = (profile.get("headline", "") or "") + " " + (profile.get("summary", "") or "")
-    skill_fit, disq_frac   = score_skill_fit(skills, extra_text, career)
-    product_fit, consult_frac, prod_ratio = score_product_fit(profile, career)
-    behavioral  = score_behavioral(signals, notice)
+    skill_fit, _           = score_skill_fit(skills, extra_text, career)
+    product_fit, consult_frac, _ = score_product_fit(profile, career)
+    behavioral  = score_behavioral(signals)
     loc_sc      = score_location(profile, signals)
     penalties   = compute_hard_penalties(profile, career, skills, signals, consult_frac)
 
@@ -889,7 +902,7 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     primary_hits = len(set(PRIMARY_CORE_RE.findall(full_text)))
     secondary_hits = len(set(SECONDARY_CORE_RE.findall(full_text)))
     
-    title_lower = profile.get("job_title", "").lower()
+    title_lower = profile.get("current_title", "").lower()
     title_bonus = 0.2 if any(kw in title_lower for kw in ("search engineer", "retrieval engineer", "recommendation engineer", "relevance engineer")) else 0.0
     
     generic_ml = any(kw in title_lower for kw in ("data scientist", "machine learning", "ml engineer", "data engineer"))
@@ -912,7 +925,6 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     features["vector_search"] = min(1.0, (explicit_hits * 0.40) + (vector_hits * 0.15))
 
     # 4. Notice Period (15%)
-    notice = int(signals.get("notice_period_days", 60) or 60)
     if notice <= 15:       notice_score = 1.00
     elif notice <= 30:     notice_score = 0.90
     elif notice <= 60:     notice_score = 0.40
@@ -928,9 +940,10 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     # STAGE 2: Weighted Linear Scoring
     # ==========================================
     raw_score = (
-        0.35 * features["search_retrieval"] +
-        0.25 * features["vector_search"] +
-        0.20 * features["production"] +
+        0.30 * features["search_retrieval"] +
+        0.20 * features["vector_search"] +
+        0.15 * features["production"] +
+        0.15 * behavioral +
         0.15 * features["notice_period"] +
         0.05 * features["open_to_work"]
     )
@@ -943,9 +956,7 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     # ==========================================
     # STAGE 3: Penalties & Tie Breakers
     # ==========================================
-    rr = float(signals.get("recruiter_response_rate", 0) or 0)
-    rr_penalty = 0.05 if rr < 0.20 else 0.0
-    
+    # rr_penalty removed from here because recruiter_response_rate is fully handled in score_behavioral.
     last_dt = parse_date(signals.get("last_active_date", ""))
     recent_activity = 1.0
     if last_dt:
@@ -953,15 +964,14 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
         recent_activity = max(0.0, 1.0 - (days / 180.0))
         
     cat_tie = 0.001 * (primary_hits + explicit_hits)
-    tie_break = (0.01 * rr) + (0.005 * recent_activity) + cat_tie + (0.01 * behavioral)
+    tie_break = (0.005 * recent_activity) + cat_tie
     
-    penalized_score = max(0.0, raw_score + tie_break - penalties - rr_penalty)
+    penalized_score = max(0.0, raw_score + tie_break - penalties)
     
     # ==========================================
     # STAGE 4: Non-Linear Calibration (Sigmoid)
     # ==========================================
     # Spreads out top candidates while squashing the middle/bottom
-    import math
     final_score = 1.0 / (1.0 + math.exp(-6.0 * (penalized_score - 0.50)))
 
     reasoning, category = generate_reasoning(features, profile, career, skills, notice, signals, penalized_score, consult_frac)
@@ -1107,8 +1117,8 @@ def main() -> None:
     if sys.platform == 'win32':
         sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(
-        description="Bug Hunters - Redrob Hackathon Ranker v3.4 (Fixed)\n"
-                    "Two-pass: 100K stream -> fast filter -> 5K -> deep score -> CSV",
+        description="Bug Hunters - Redrob Hackathon Ranker v4.1\n"
+                    "Two-pass: 100K stream -> fast filter (threshold >= 1.5) -> deep score -> CSV",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--candidates", required=True,
