@@ -17,7 +17,7 @@ Design principles:
   1. Retrieval/Search/Ranking/VectorDB skills >> trendy LLM tooling  (JD warns about this)
   2. Shippers > Researchers -- production deployment evidence is first-class signal
   3. Behavioral availability is 35%: inactive candidate = effectively unavailable (JD explicit)
-  4. Two-pass: 100K -> fast filter (top 500) -> deep score -> 100
+  4. Two-pass: 100K -> fast filter (top 5000) -> deep score -> 100
   5. No external deps -- pure stdlib -> zero import errors in sandboxed grading env
 
 FIXED BUGS vs v2 (see CHANGELOG at bottom):
@@ -39,14 +39,16 @@ Usage:
 """
 
 import json
+import sys
+import math
+import re
 import csv
 import gzip
 import argparse
-import sys
 import time
-import math
 from datetime import datetime, date
 from pathlib import Path
+from typing import Dict, Any
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,22 +104,22 @@ TIER1_SKILLS = frozenset({
     "search engine", "search ranking", "search system", "search infrastructure",
     "recommendation system", "recommender", "recommender system", "ranking system",
     "learning to rank", "ltr", "lambdamart", "lambdarank", "ranknet",
-    "bi-encoder", "cross-encoder",
+    "bi encoder", "cross encoder",
     "faiss", "elasticsearch", "opensearch", "qdrant", "milvus",
     "weaviate", "pinecone", "pgvector", "vespa", "annoy", "scann", "chroma",
     "vector database", "vector db", "vector store", "vector index",
     "ann", "approximate nearest neighbor", "hnsw",
-    "reranking", "re-ranking", "reranker", "colbert",
-    "bm25", "tfidf", "tf-idf",
+    "reranking", "re ranking", "reranker", "colbert",
+    "bm25", "tfidf", "tf idf",
     "ndcg", "mrr", "mean reciprocal rank", "map", "mean average precision",
-    "a/b testing", "ab testing", "offline evaluation", "online evaluation",
+    "a b testing", "ab testing", "offline evaluation", "online evaluation",
     "eval framework", "evaluation framework",
 })
 
 # Tier 2 — strong supporting skills
 TIER2_SKILLS = frozenset({
     "rag", "retrieval augmented generation",
-    "embeddings", "embedding", "sentence-transformers", "sentence transformer",
+    "embeddings", "embedding", "sentence transformers", "sentence transformer",
     "text embedding", "openai embeddings", "bge", "e5 model", "dense embedding",
     "nlp", "natural language processing", "language model", "text classification",
     "bert", "transformers", "huggingface", "hugging face",
@@ -127,7 +129,7 @@ TIER2_SKILLS = frozenset({
     "distributed systems", "distributed training",
     "mlflow", "wandb", "ray", "dask",
     "xgboost", "lightgbm", "gradient boosting",
-    "scikit-learn", "sklearn",
+    "scikit learn", "sklearn",
     "python", "fastapi", "flask", "docker", "kubernetes",
     "spark", "kafka", "airflow",
     "aws", "gcp", "azure",
@@ -138,7 +140,7 @@ TIER2_SKILLS = frozenset({
 TIER3_SKILLS = frozenset({
     "langchain", "lang chain",
     "prompt engineering", "instruction tuning",
-    "qlora", "lora", "peft", "fine-tuning", "fine tuning", "finetuning",
+    "qlora", "lora", "peft", "fine tuning", "finetuning",
     "llm", "large language model", "generative ai",
     "openai", "chatgpt", "gpt",
     "rlhf",
@@ -149,7 +151,7 @@ DISQUALIFYING_SKILLS = frozenset({
     "computer vision", "image classification", "object detection",
     "yolo", "convolutional", "image segmentation",
     "opencv",
-    "speech recognition", "asr", "tts", "text-to-speech", "speech synthesis",
+    "speech recognition", "asr", "tts", "text to speech", "speech synthesis",
     "audio processing", "sound classification", "voice recognition",
     "robotics", "ros", "autonomous driving", "lidar", "slam",
     "photoshop", "illustrator", "figma", "canva",
@@ -159,7 +161,6 @@ DISQUALIFYING_SKILLS = frozenset({
     "solidworks", "autocad",
 })
 
-import re
 TIER1_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(TIER1_SKILLS, key=len, reverse=True))) + r')\b')
 TIER2_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(TIER2_SKILLS, key=len, reverse=True))) + r')\b')
 TIER3_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(TIER3_SKILLS, key=len, reverse=True))) + r')\b')
@@ -187,6 +188,9 @@ CONSULTING_NAMES = frozenset({
     "persistent systems", "cyient", "zensar", "birlasoft", "coforge",
     "kpit", "mastech", "firstsource", "wns", "genpact",
 })
+CONSULTING_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, CONSULTING_INDUSTRIES | CONSULTING_NAMES)) + r')\b')
+
+ELITE_SEARCH_COMPANIES = frozenset({"google", "meta", "facebook", "linkedin", "netflix", "pinterest", "airbnb", "amazon"})
 
 STRONG_TITLE_SCORES: dict[str, float] = {
     "search engineer": 1.0, "ranking engineer": 1.0,
@@ -230,12 +234,14 @@ SHIP_SIGNALS = frozenset({
     "search engine", "embedding service", "vector index", "reranker",
     "search platform", "recommendation platform",
 })
+SHIP_SIGNALS_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, SHIP_SIGNALS)) + r')\b')
 
 RESEARCH_SIGNALS = frozenset({
     "paper", "publication", "conference", "arxiv", "journal",
     "thesis", "academic", "phd candidate", "research lab",
     "pure research", "benchmark", "theoretical",
 })
+RESEARCH_SIGNALS_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, RESEARCH_SIGNALS)) + r')\b')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -266,6 +272,8 @@ def is_honeypot(candidate: dict) -> bool:
     profile  = candidate.get("profile", {}) or {}
     career   = candidate.get("career_history", []) or []
     skills   = candidate.get("skills", []) or []
+    claimed_yoe = float(profile.get("years_of_experience", 0) or 0)
+    actual_yoe  = float(candidate.get("calculated_yoe", 0) or 0)
 
     # 1. Job duration > calendar months since start date (time travel)
     for job in career:
@@ -276,15 +284,20 @@ def is_honeypot(candidate: dict) -> bool:
             if stated > max_possible + 6:
                 return True
 
-    # 2. Expert proficiency + 0 duration on 3+ skills (impossible mastery)
-    expert_zero = sum(
-        1 for s in skills
-        if s.get("proficiency") == "expert" and int(s.get("duration_months", 0) or 0) == 0
-    )
-    if expert_zero >= 3:
+    # 1) Impossible overlapping jobs
+    if actual_yoe > claimed_yoe + 3.0 and actual_yoe > 10.0:
         return True
 
-    # (Rule 3 removed: Claimed YOE vs career history is now a penalty, not disqualification)
+    # 2) Skill duration honeypot
+    # JD warns about candidates who claim "expert" on everything with 0 real experience
+    if skills and claimed_yoe <= 10.0 and actual_yoe <= 10.0:
+        expert_advanced = [s for s in skills if str(s.get("proficiency", "")).lower() in ("expert", "advanced")]
+        
+        zero_evidence = sum(1 for s in expert_advanced if float(s.get("duration_months", 0) or 0) <= 0.0)
+        if len(expert_advanced) >= 20 and zero_evidence >= 10:
+            return True
+        if len(expert_advanced) >= 30 and zero_evidence >= 20:
+            return True
 
     # 4. Keyword stuffer: 20+ expert skills but lacks duration/endorsement or has domain conflicts
     expert_advanced = [s for s in skills if s.get("proficiency") in ("expert", "advanced")]
@@ -294,8 +307,8 @@ def is_honeypot(candidate: dict) -> bool:
             return True
         # Domain conflict check
         names = " ".join(s.get("name", "").lower() for s in expert_advanced)
-        has_non_tech = any(kw in names for kw in ("accounting", "tally", "sales", "hr", "marketing", "seo", "content writing"))
-        has_tech = any(kw in names for kw in ("machine learning", "backend", "react", "python", "aws"))
+        has_non_tech = any(re.search(rf"\b{kw}\b", names) for kw in ("accounting", "tally", "sales", "hr", "marketing", "seo", "content writing"))
+        has_tech = any(re.search(rf"\b{kw}\b", names) for kw in ("machine learning", "backend", "react", "python", "aws"))
         if has_non_tech and has_tech:
             return True
 
@@ -336,7 +349,7 @@ def fast_score(candidate: dict) -> float:
 
     t1_count = t2_count = 0
     for s in skills:
-        name = re.sub(r"[-_/]", " ", s.get("name", "").lower()).strip()
+        name = s.get("name", "").lower().replace("-", " ").replace("_", " ").replace("/", " ").strip()
         if len(name) < 3:          # [B3] skip single/double chars to avoid false positives
             continue
         if TIER1_REGEX.search(name):
@@ -349,26 +362,29 @@ def fast_score(candidate: dict) -> float:
     # Scan headline + summary + career descriptions for JD concepts
     headline = profile.get("headline", "") or ""
     summary  = profile.get("summary", "")  or ""
-    career_desc = " ".join(j.get("description", "") or "" for j in career[:3])[:4000]
+    career_desc = ""
+    elite_hit = False
+    for j in career[:3]:
+        company = (j.get("company", "") or "").lower()
+        if any(elite in company for elite in ELITE_SEARCH_COMPANIES):
+            elite_hit = True
+        career_desc += (j.get("description", "") or "") + " "
+    career_desc = career_desc[:4000]
     combined = (headline + " " + summary + " " + career_desc).lower()
 
     # "information retrieval" is covered by "retrieval", so we can use single-word tokens
-    FAST_WORDS = {
-        "retrieval", "recommendation", "ranking", "search", "vector",
-        "embedding", "nlp", "rag", "ndcg",
-        "faiss", "qdrant", "pinecone", "milvus", "elasticsearch", "weaviate"
-    }
-    
-    text_hit = any(word in combined for word in FAST_WORDS)
+    FAST_WORDS_RE = re.compile(r'\b(retrieval|recommendation|ranking|search|vector|embedding|nlp|rag|ndcg|faiss|qdrant|pinecone|milvus|elasticsearch|weaviate)\b')
+    text_hit = bool(FAST_WORDS_RE.search(combined))
 
     # [C3] Catch plain-language shippers who don't use keyword buzzwords
     # JD warns: "A Tier 5 candidate may not use the words 'RAG' or 'Pinecone'"
-    SHIP_FAST = {"shipped", "deployed", "production", "at scale", "million", "serving", "built and"}
-    ship_hits = sum(1 for w in SHIP_FAST if w in combined)
+    SHIP_FAST_RE = re.compile(r'\b(shipped|deployed|production|at scale|million|serving|built and)\b')
+    ship_hits = len(set(SHIP_FAST_RE.findall(combined)))
 
     score = t1_count * 2.5 + t2_count * 0.5
     if title_hit:  score += 4.0
     if text_hit:   score += 1.0
+    if elite_hit:  score += 3.0
     score += min(ship_hits * 0.5, 2.0)  # Up to +2.0 for shipping evidence
     return score - score_penalty
 
@@ -460,10 +476,7 @@ def score_product_fit(profile: dict, career: list) -> tuple[float, float, float]
         duration = max(1, int(job.get("duration_months", 1) or 1))
         total_months += duration
 
-        is_consulting = (
-            any(ci in industry for ci in CONSULTING_INDUSTRIES)
-            or any(cn in company for cn in CONSULTING_NAMES)
-        )
+        is_consulting = bool(CONSULTING_RE.search(industry) or CONSULTING_RE.search(company))
         if is_consulting:
             consulting_months += duration
 
@@ -474,16 +487,16 @@ def score_product_fit(profile: dict, career: list) -> tuple[float, float, float]
             else 1.00
         )
 
-        ship_hits     = sum(1 for kw in SHIP_SIGNALS     if kw in desc)
-        research_hits = sum(1 for kw in RESEARCH_SIGNALS if kw in desc)
+        has_tech = bool(TIER1_REGEX.search(desc) or TIER2_REGEX.search(desc))
+        ship_hits = len(set(SHIP_SIGNALS_RE.findall(desc))) if has_tech else 0
+        research_hits = len(set(RESEARCH_SIGNALS_RE.findall(desc)))
         ship_score     += ship_hits * duration * size_mult
         research_score += research_hits * duration
 
     consult_frac = consulting_months / total_months if total_months > 0 else 0.0
-    total_signal = ship_score + research_score
-    prod_ratio   = ship_score / total_signal if total_signal > 0 else 0.20
+    prod_score = min(1.0, ship_score / 50.0)
 
-    if prod_ratio > 0.50:
+    if prod_score > 0.50:
         if   consult_frac >= 0.95: consult_mult = 0.40
         elif consult_frac >= 0.80: consult_mult = 0.60
         elif consult_frac >= 0.65: consult_mult = 0.80
@@ -496,8 +509,8 @@ def score_product_fit(profile: dict, career: list) -> tuple[float, float, float]
         elif consult_frac >= 0.50: consult_mult = 0.68
         else:                       consult_mult = 1.00
 
-    raw = (0.40 * title_score + 0.60 * prod_ratio) * consult_mult
-    return clamp(raw), consult_frac, prod_ratio
+    raw = (0.40 * title_score + 0.60 * prod_score) * consult_mult
+    return clamp(raw), consult_frac, prod_score
 
 
 def score_behavioral(signals: dict) -> float:
@@ -529,7 +542,8 @@ def score_behavioral(signals: dict) -> float:
     saves_score = clamp(saves / 5.0)    # 5+ saves → 1.0
 
     # 5. Offer acceptance rate
-    oar = float(signals.get("offer_acceptance_rate", -1) or -1)
+    oar_val = signals.get("offer_acceptance_rate")
+    oar = float(oar_val) if oar_val is not None else -1.0
     oar_score = clamp(oar) if oar >= 0 else 0.5
 
     # 6. Search appearance (market demand)
@@ -641,10 +655,10 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
 
     # Research-heavy career (pure academic, no production)
     if career:
+        RESEARCH_HEAVY_RE = re.compile(r'\b(paper|publication|thesis|arxiv|academic)\b')
         research_heavy_count = sum(
             1 for job in career
-            if sum(1 for kw in ("paper", "publication", "thesis", "arxiv", "academic")
-                   if kw in (job.get("description", "") or "").lower()) >= 2
+            if len(set(RESEARCH_HEAVY_RE.findall((job.get("description", "") or "").lower()))) >= 2
         )
         if research_heavy_count >= len(career) * 0.60:
             penalty += 0.18
@@ -656,20 +670,16 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
             if avg_tenure < 18:
                 penalty += 0.35
 
-    # [H5] Consulting penalty restored as per JD requirements
-    if consult_frac >= 0.90:
-        penalty += 0.40
     # LangChain + OpenAI only with NO retrieval/search skills at all
     skill_names = " ".join(s.get("name", "").lower() for s in skills)
     has_tier1   = any(
         len(s.get("name", "").lower()) >= 3
-        and any(kw in s.get("name", "").lower()
-                for kw in TIER1_SKILLS)
+        and TIER1_REGEX.search(re.sub(r"[-_/]", " ", s.get("name", "").lower()))
         for s in skills
     )
     llm_hype_only = (
         not has_tier1
-        and any(kw in skill_names for kw in ("langchain", "prompt engineering", "openai", "chatgpt"))
+        and any(re.search(rf"\b{kw}\b", skill_names) for kw in ("langchain", "prompt engineering", "openai", "chatgpt"))
     )
     if llm_hype_only:
         penalty += 0.35
@@ -915,7 +925,14 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     # 1. Advanced Job-Level Temporal Extraction
     # Iterate through the 4 most recent jobs with decaying weights
     for i, job in enumerate(career[:4]):
-        decay = max(0.4, 1.0 - (i * 0.2)) # 1.0, 0.8, 0.6, 0.4
+        end_str = str(job.get("end_date", str(TODAY))).split("T")[0]
+        try:
+            end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+        except ValueError:
+            end_date = TODAY
+        
+        years_ago = max(0.0, (TODAY - end_date).days / 365.25)
+        decay = max(0.2, math.exp(-0.20 * years_ago))
         
         job_desc = (job.get("description", "") or "").lower()
         job_title = (job.get("title", "") or "").lower()
@@ -963,12 +980,11 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
 
     # 3. Search/Retrieval Expertise (30%)
     title_lower = profile.get("current_title", "").lower()
-    title_bonus = 0.2 if any(kw in title_lower for kw in ("search engineer", "retrieval engineer", "recommendation engineer", "relevance engineer")) else 0.0
     
     generic_ml = any(kw in title_lower for kw in ("data scientist", "machine learning", "ml engineer", "data engineer"))
     generic_penalty = 0.3 if generic_ml and primary_hits == 0 and explicit_hits == 0 else 0.0
     
-    sr_score = skill_fit + (primary_hits * 0.30) + (secondary_hits * 0.15) + (eval_hits * 0.15) + hybrid_search_bonus + implicit_ltr_bonus + title_bonus - generic_penalty
+    sr_score = skill_fit + (primary_hits * 0.30) + (secondary_hits * 0.15) + (eval_hits * 0.15) + hybrid_search_bonus + implicit_ltr_bonus - generic_penalty
     features["search_retrieval"] = min(1.0, max(0.0, sr_score))
 
     # 4. Production Experience (15%)
@@ -1021,21 +1037,14 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
         recent_activity = max(0.0, 1.0 - (days / 180.0))
         
     github_score = int(signals.get("github_activity_score", 0) or 0) / 100.0
-    title_match = 1.0 if any(kw in title_lower for kw in ("search engineer", "ranking engineer")) else 0.0
     
     cat_tie = 0.001 * (primary_hits + explicit_hits)
-    tie_break = (0.005 * recent_activity) + (0.003 * github_score) + (0.002 * title_match) + cat_tie
+    tie_break = (0.005 * recent_activity) + (0.003 * github_score) + cat_tie
     
     penalized_score = max(0.0, raw_score + tie_break - penalties)
     
-    # ==========================================
-    # STAGE 4: Non-Linear Calibration (Sigmoid)
-    # ==========================================
-    # Spreads out top candidates while squashing the middle/bottom
-    final_score = 1.0 / (1.0 + math.exp(-6.0 * (penalized_score - 0.50)))
-
     reasoning, category = generate_reasoning(features, profile, career, skills, notice, signals, penalized_score, consult_frac, candidate.get("candidate_id", ""))
-    return final_score, reasoning, category
+    return penalized_score, reasoning, category
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1116,8 +1125,8 @@ def rank_candidates(input_path: str, output_path: str) -> None:
 
     print(f"[Pass 1] Done: {total:,} candidates scanned in {time.time()-t0:.1f}s")
     fast_pool.sort(key=lambda x: -x[0])
-    # Pass top 500 candidates to deep scoring
-    pool = [(s, cid, c) for s, cid, c in fast_pool][:500]
+    # Pass top 5000 candidates to deep scoring
+    pool = [(s, cid, c) for s, cid, c in fast_pool][:5000]
     print(f"[Pass 1] Top {len(pool)} candidates passed to Pass 2 (dropped {total - len(pool)})")
 
     # ── PASS 2 ────────────────────────────────────────────────────────────────
@@ -1177,7 +1186,7 @@ def main() -> None:
         sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(
         description="Bug Hunters - Redrob Hackathon Ranker v4.1\n"
-                    "Two-pass: 100K stream -> fast filter (top 500) -> deep score -> CSV",
+                    "Two-pass: 100K stream -> fast filter (top 5000) -> deep score -> CSV",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--candidates", required=True,
