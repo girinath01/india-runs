@@ -1018,10 +1018,10 @@ def iter_candidates(input_path: str):
 # TWO-PASS RANKING PIPELINE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def rank_candidates(input_path: str, output_path: str, top_k: int = 5000) -> None:
+def rank_candidates(input_path: str, output_path: str) -> None:
     """
-    Pass 1: Stream all 100 K -> fast_score -> keep top {top_k}
-    Pass 2: deep_score on top {top_k} -> select top 100
+    Pass 1: Stream all 100K -> fast_score -> keep all with score > 0
+    Pass 2: deep_score on survivors -> select top 100
     """
     t0 = time.time()
     print(f"[Ranker v4.0]  Input : {input_path}")
@@ -1046,8 +1046,9 @@ def rank_candidates(input_path: str, output_path: str, top_k: int = 5000) -> Non
 
     print(f"[Pass 1] Done: {total:,} candidates scanned in {time.time()-t0:.1f}s")
     fast_pool.sort(key=lambda x: -x[0])
-    pool = fast_pool[:top_k]
-    print(f"[Pass 1] top {len(pool)} passed to Pass 2")
+    # Pass ALL positively-scored candidates to deep scoring (no arbitrary cutoff)
+    pool = [(s, cid, c) for s, cid, c in fast_pool if s > 0]
+    print(f"[Pass 1] {len(pool)} candidates with positive score passed to Pass 2 (dropped {total - len(pool)} negatives)")
 
     # ── PASS 2 ────────────────────────────────────────────────────────────────
     print(f"\n[Pass 2] Deep scoring top {len(pool)} candidates...")
@@ -1113,10 +1114,8 @@ def main() -> None:
                         help="Path to candidates.jsonl, .jsonl.gz, or sample_candidates.json")
     parser.add_argument("--out", required=True,
                         help="Output CSV path (e.g. bug_hunters.csv)")
-    parser.add_argument("--top-k", type=int, default=3000,
-                        help="Pass-1 shortlist size (default 3000)")
     args = parser.parse_args()
-    rank_candidates(args.candidates, args.out, args.top_k)
+    rank_candidates(args.candidates, args.out)
 
 
 if __name__ == "__main__":
