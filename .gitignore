@@ -21,8 +21,7 @@ candidates.jsonl.gz
 *.jsonl.gz
 
 # Output
-submission*.csv
-*_test.csv
+*.csv
 
 # Editor / OS
 .DS_Store
