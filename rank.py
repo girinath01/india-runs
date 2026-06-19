@@ -654,10 +654,11 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
             total_months = sum(max(1, int(j.get("duration_months", 1) or 1)) for j in career)
             avg_tenure = total_months / len(career)
             if avg_tenure < 18:
-                penalty += 0.15
+                penalty += 0.35
 
-    # [H5] Consulting penalty removed — handled by score_product_fit() via consult_mult.
-
+    # [H5] Consulting penalty restored as per JD requirements
+    if consult_frac >= 0.90:
+        penalty += 0.40
     # LangChain + OpenAI only with NO retrieval/search skills at all
     skill_names = " ".join(s.get("name", "").lower() for s in skills)
     has_tier1   = any(
@@ -671,7 +672,7 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
         and any(kw in skill_names for kw in ("langchain", "prompt engineering", "openai", "chatgpt"))
     )
     if llm_hype_only:
-        penalty += 0.14
+        penalty += 0.35
 
     # [C5] Strict Behavioral Penalties for Unavailability
     otw = signals.get("open_to_work_flag", False)
@@ -772,7 +773,7 @@ def generate_reasoning(features: dict, profile: dict, career: list, skills: list
     # ── Build strengths list (factual, JD-connected) ────────────────────────
     strengths = []
     if tier1_found:
-        strengths.append(f"production experience with {', '.join(tier1_found[:3])}, matching JD's core retrieval/ranking requirement")
+        strengths.append(f"expertise in {', '.join(tier1_found[:3])}, matching JD's core retrieval/ranking requirement")
     elif features.get("search_retrieval", 0) >= 0.4:
         strengths.append("solid search/ranking background relevant to JD's retrieval focus")
     if features.get("production", 0) >= 0.5:
@@ -949,8 +950,9 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
         vector_hits += (v_hits * decay)
         explicit_hits += (ex_hits * decay)
 
-    # 2. Add headline/summary hits (no decay)
-    full_extra = extra_text.lower()
+    # 2. Add headline/summary and skills hits (no decay)
+    skill_names = " ".join([s.get("name", "").lower() for s in skills])
+    full_extra = extra_text.lower() + " " + skill_names
     primary_hits += len(set(PRIMARY_CORE_RE.findall(full_extra)))
     secondary_hits += len(set(SECONDARY_CORE_RE.findall(full_extra)))
     eval_hits += len(set(EVAL_TEXT_RE.findall(full_extra)))
