@@ -41,22 +41,16 @@ ai_usage_summary: |
   The ranking runs entirely offline with no API calls at inference time.
 
 methodology_summary: |
-  Multi-signal hybrid scorer — 7 components, no GPU, no network.
-  Skills match (26%): proficiency+endorsement+duration weighted keyword overlap
-  against JD requirements; also scans profile summary and headline for JD concept
-  areas to catch plain-language candidates without buzzword skills lists.
-  Title/career fit (22%): current title + career history with consulting detection
-  via the industry field (more reliable than company name matching).
-  Production experience (20%): NLP on career descriptions — production signals
-  (deployed, shipped, at scale, real users) vs research-only signals, weighted
-  by job duration. Experience years (12%): curve peaking at 6-7yr per JD sweet
-  spot. Behavioral signals (10%): 12 sub-signals — open-to-work, activity
-  recency, response rate, interview completion, GitHub activity, notice period,
-  profile completeness, recruiter saves, assessment scores, response time,
-  active applications, verified contacts. Location (6%), Education (4%).
-  Disqualifier multipliers for consulting-only careers (0.12-0.72x), non-tech
-  titles (0.18x), CV/Speech/Robotics focus (0.22-0.52x). Honeypot detection via
-  4 impossibility checks. Runtime ~90s for 100K candidates on CPU.
+  Multi-signal hybrid scorer — 2 passes, no GPU, no network.
+  Pass 1 filters strictly on positive fast_score (drops obvious non-tech).
+  Pass 2 deep scores top 500 candidates.
+  Search/Retrieval (45%): LTR, BM25, and IR explicit hits.
+  Vector DBs (25%): Massive boosts for explicit Vector DB operational experience.
+  Production experience (20%): Shipped/scaled/deployed signals vs purely academic.
+  Behavioral Base (10%): Recency, github activity, connections, assessments.
+  Massive Uncapped Penalties: Not open to work, extreme notice periods, job hoppers,
+  and purely consulting-only careers receive -0.35 to -0.40 linear penalties to mathematically drop them out.
+  Honeypot detection via 4 impossibility checks. Runtime ~23s for 100K candidates on CPU.
 
 declarations:
   read_submission_spec: true

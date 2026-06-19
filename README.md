@@ -20,8 +20,7 @@ Accepts `.jsonl` (uncompressed) and `.jsonl.gz` (gzipped) input.
 ## Scoring Formula (v4.0)
 
 ```
-FinalScore = 0.35×SearchRetrieval + 0.25×VectorSearch + 0.20×Production
-           + 0.15×NoticePeriod + 0.05×OpenToWork
+FinalScore = 0.45×SearchRetrieval + 0.25×VectorSearch + 0.20×Production + 0.10×BehavioralBase
 ```
 
 *(Note: A Sigmoid calibration function is applied to spread scores cleanly before tie-breaking).*
@@ -30,16 +29,14 @@ FinalScore = 0.35×SearchRetrieval + 0.25×VectorSearch + 0.20×Production
 
 | Component | Weight | Key Logic |
 |---|---|---|
-| **Search/Retrieval** | 35% | Primary hits (BM25, LTR, Information Retrieval). Penalizes generic ML profiles lacking search experience. Rewards Search/Retrieval titles. |
+| **Search/Retrieval** | 45% | Primary hits (BM25, LTR, Information Retrieval). Penalizes generic ML profiles lacking search experience. Rewards Search/Retrieval titles. |
 | **Vector DBs** | 25% | Massive boosts for explicit Vector DBs (FAISS, Pinecone, Qdrant, Weaviate, Milvus, pgvector). |
 | **Production Experience** | 20% | Heavy focus on deployed systems, large-scale inference. Penalizes pure academic/researchers. |
-| **Notice Period** | 15% | <=15 days gets 100% of score. 16-30 days gets 90%. >90 days gets 0%. |
-| **Open To Work** | 5% | Binary metric. Missing OTW removes 5% of final score. |
+| **Behavioral Base** | 10% | Last active recency, recruiter response rate, github activity, connections, etc. |
 
 ### Tie-Breakers & Modifiers
-- **Experience Sweet Spot**: 5–9 years of experience applies a 1.15x multiplier. Junior profiles (<3.5 yrs) suffer a 0.80x multiplier.
-- **Location Alignment**: Candidates in preferred locations (Pune/Noida) retain 100% of their score. Unwilling or out-of-country candidates suffer an 8.2% multiplier deduction.
-- **Recruiter Response**: Candidates with <20% response rate receive a flat -0.05 deduction at the tie-breaker stage.
+- **Massive Hard Penalties**: Candidates who are NOT open to work (-0.40), have extreme notice periods (-0.35), are Job Hoppers (-0.35), or have purely Consulting careers (-0.40) suffer massive linear penalties *before* Sigmoid scaling, ensuring they are mathematically blocked from the top 100.
+- **Location Alignment**: Candidates in preferred locations (Pune/Noida/Delhi NCR) retain 100% of their score. Unwilling candidates suffer deductions. Global talent willing to relocate is scored fairly without hard biases.
 - **Honeypot Shield**: The system soft-penalizes honeypots in Pass 1 to allow them through for proper auditing, and cleanly zeroes them in Pass 2.
 
 ---
@@ -50,11 +47,11 @@ FinalScore = 0.35×SearchRetrieval + 0.25×VectorSearch + 0.20×Production
 100,000 candidates
      ↓
   Pass 1: Fast filter (~1s per 10K)
-  Check: has any Tier-1 skill OR high-signal title
+  Check: positive fast_score (drops obvious non-tech / irrelevant profiles)
      ↓
-  Top 5,000 candidates
+  Top 500 candidates
      ↓
-  Pass 2: Full 5-component deep scoring
+  Pass 2: Full multi-signal deep scoring
      ↓
   Top 100 → sorted by score (tie-break: ascending candidate_id)
      ↓
@@ -70,8 +67,8 @@ This keeps runtime under 60 seconds on CPU, well within the 5-minute limit.
 ```
 redrob_ranker/
 ├── rank.py                   # Main ranker — single command to reproduce
-├── validate_submission.py    # Official format validator
-├── requirements.txt          # Minimal deps (tqdm, pyyaml)
 ├── submission_metadata.yaml  # Team metadata and methodology
-└── README.md                 # This file
+├── README.md                 # This file
+├── tools/                    # Validation, auditing, and compare scripts
+└── tests/                    # Unit tests for scoring logic
 ```
