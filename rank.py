@@ -1046,9 +1046,10 @@ def rank_candidates(input_path: str, output_path: str) -> None:
 
     print(f"[Pass 1] Done: {total:,} candidates scanned in {time.time()-t0:.1f}s")
     fast_pool.sort(key=lambda x: -x[0])
-    # Pass ALL positively-scored candidates to deep scoring (no arbitrary cutoff)
-    pool = [(s, cid, c) for s, cid, c in fast_pool if s > 0]
-    print(f"[Pass 1] {len(pool)} candidates with positive score passed to Pass 2 (dropped {total - len(pool)} negatives)")
+    # Pass candidates with meaningful relevance signal to deep scoring
+    # >= 1.5 requires at least one Tier1 skill OR a relevant title + text evidence
+    pool = [(s, cid, c) for s, cid, c in fast_pool if s >= 1.5]
+    print(f"[Pass 1] {len(pool)} candidates above threshold (>= 1.5) passed to Pass 2 (dropped {total - len(pool)})")
 
     # ── PASS 2 ────────────────────────────────────────────────────────────────
     print(f"\n[Pass 2] Deep scoring top {len(pool)} candidates...")
