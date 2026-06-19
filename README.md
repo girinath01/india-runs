@@ -1,74 +1,71 @@
-# Redrob Hackathon — Bug Hunters
+# Redrob Hackathon — Bug Hunters (v4.1)
 
-Ranking system for the **Intelligent Candidate Discovery & Ranking Challenge**
-by Redrob AI. Produces a top-100 submission CSV for the Senior AI Engineer JD.
+Highly optimized candidate ranking system for the **Intelligent Candidate Discovery & Ranking Challenge** by Redrob AI. Designed to isolate elite Senior Relevance/Search Engineers and produce a top-100 submission CSV tailored for maximum NDCG@10, Recall, and Precision.
 
 ## Reproduce Command
 
 ```bash
 pip install -r requirements.txt
 python rank.py --candidates ./candidates.jsonl --out ./bug_hunters.csv
-python validate_submission.py bug_hunters.csv
 ```
 
-Accepts `.jsonl` (uncompressed) and `.jsonl.gz` (gzipped) input.  
-**Runtime: ~20-40 seconds** for 100,000 candidates on CPU (two-pass pipeline).  
-**Memory: ~2–3 GB** (streams JSONL, never loads full dataset at once).
+Accepts `.jsonl` (uncompressed), `.jsonl.gz` (gzipped), and `.json` arrays.  
+**Runtime: ~20 seconds** for 100,000 candidates on CPU.  
+**Memory: ~50 MB** (streams JSONL using lazy evaluation; never loads full dataset).
 
 ---
 
-## Scoring Formula (v4.0)
+## Architecture & Logic Flow
 
-```
-FinalScore = 0.45×SearchRetrieval + 0.25×VectorSearch + 0.20×Production + 0.10×BehavioralBase
-```
+The system processes candidates using an ultra-fast, two-pass architecture.
 
-*(Note: A Sigmoid calibration function is applied to spread scores cleanly before tie-breaking).*
+### Pass 1: Fast Filter (100K → Top 5,000)
+A highly optimized, regex-driven heuristic pass that drops 95% of candidates.
+- Evaluates top-level titles against `STRONG_TITLE_SCORES`.
+- Performs string-normalized matching across `TIER1_SKILLS` and `TIER2_SKILLS`.
+- Checks combined headline, summary, and recent job descriptions for core search/vector terminology.
+- **Elite Company Anchor:** Automatically grants a massive fast-score bypass to candidates with experience at FAANG or elite search companies (e.g., Google, Meta, Pinterest) who might use natural language instead of keyword-stuffed buzzwords.
 
-### Component Details
-
-| Component | Weight | Key Logic |
-|---|---|---|
-| **Search/Retrieval** | 45% | Primary hits (BM25, LTR, Information Retrieval). Penalizes generic ML profiles lacking search experience. Rewards Search/Retrieval titles. |
-| **Vector DBs** | 25% | Massive boosts for explicit Vector DBs (FAISS, Pinecone, Qdrant, Weaviate, Milvus, pgvector). |
-| **Production Experience** | 20% | Heavy focus on deployed systems, large-scale inference. Penalizes pure academic/researchers. |
-| **Behavioral Base** | 10% | Last active recency, recruiter response rate, github activity, connections, etc. |
-
-### Tie-Breakers & Modifiers
-- **Massive Hard Penalties**: Candidates who are NOT open to work (-0.40), have extreme notice periods (-0.35), are Job Hoppers (-0.35), or have purely Consulting careers (-0.40) suffer massive linear penalties *before* Sigmoid scaling, ensuring they are mathematically blocked from the top 100.
-- **Location Alignment**: Candidates in preferred locations (Pune/Noida/Delhi NCR) retain 100% of their score. Unwilling candidates suffer deductions. Global talent willing to relocate is scored fairly without hard biases.
-- **Honeypot Shield**: The system soft-penalizes honeypots in Pass 1 to allow them through for proper auditing, and cleanly zeroes them in Pass 2.
+### Pass 2: Deep Scoring (5,000 → Top 100)
+A heavy temporal and semantic extraction pass. Applies the final scoring formula, handles edge cases, and calculates deterministic tie-breakers.
 
 ---
 
-## Two-Pass Pipeline
+## Scoring Formula (v4.1)
 
-```
-100,000 candidates
-     ↓
-  Pass 1: Fast filter (~1s per 10K)
-  Check: positive fast_score (drops obvious non-tech / irrelevant profiles)
-     ↓
-  Top 500 candidates
-     ↓
-  Pass 2: Full multi-signal deep scoring
-     ↓
-  Top 100 → sorted by score (tie-break: ascending candidate_id)
-     ↓
-  bug_hunters.csv
+```text
+RawScore = 0.30×SearchRetrieval + 0.20×VectorSearch + 0.15×Production 
+         + 0.15×Behavioral + 0.15×NoticePeriod + 0.05×OpenToWork
+
+FinalScore = max(0.0, (RawScore × ExperienceFitMultiplier) + TieBreaker - HardPenalties)
 ```
 
-This keeps runtime under 60 seconds on CPU, well within the 5-minute limit.
+*(Note: Sigmoid calibration was explicitly removed in v4.1 to prevent floating-point collisions at the extreme top end, strictly preserving mathematically optimal candidate ordering for NDCG@10 evaluation).*
+
+### Component Logic
+
+| Component | Logic |
+|---|---|
+| **Search/Retrieval (30%)** | Temporal extraction of IR skills (BM25, LTR, NDCG). Penalizes generic ML profiles lacking search experience. Co-occurrence bonuses for Hybrid Search (IR + Vectors in the same job). |
+| **Vector DBs (20%)** | High-weight extraction for explicit Vector DBs (FAISS, Pinecone, Qdrant, Weaviate, Milvus). |
+| **Production Experience (15%)** | Focuses on absolute volume of deployed systems (`ship_hits`). Intersects shipping terminology with technical keywords to reject false positives (e.g., "shipped marketing emails"). |
+| **Behavioral Base (15%)** | Recruiter response rates, interview completion, offer acceptance, and github activity. |
+| **Availability (20%)** | Notice period evaluation and explicit Open-To-Work signals. |
+
+### Advanced Modifiers & Defenses
+
+1. **Date-Based Exponential Decay:** Older jobs naturally decay in weight. We calculate exact temporal chronology using parsed `end_date` vs `TODAY` to accurately discount stale tech stacks.
+2. **Honeypot Shield:** Traps 5 variations of synthetic candidates (e.g., impossible time-travel tenures, conflicting domain overlaps). Includes a **Seniority Whitelist** (>10 YOE) to prevent accidentally disqualifying legitimate senior engineers whose resumes were parsed without skill duration timestamps.
+3. **Hard Penalties:** Flat deductions for Title Chasers (<18 mo tenure), pure academics without production code, LLM hype-riders (LangChain without IR fundamentals), and candidates definitively not open to work.
 
 ---
 
 ## File Structure
 
-```
+```text
 redrob_ranker/
-├── rank.py                   # Main ranker — single command to reproduce
-├── submission_metadata.yaml  # Team metadata and methodology
-├── README.md                 # This file
-├── tools/                    # Validation, auditing, and compare scripts
-└── tests/                    # Unit tests for scoring logic
+├── rank.py                   # Main pipeline — logic, scraping, scoring, and output
+├── requirements.txt          # Minimal dependencies (tqdm)
+├── submission_metadata.yaml  # Team methodologies and hyperparameters
+└── README.md                 # System documentation
 ```
