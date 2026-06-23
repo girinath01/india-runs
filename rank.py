@@ -198,6 +198,10 @@ CONSULTING_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, CONSULTING_INDUSTR
 
 ELITE_SEARCH_COMPANIES = frozenset({"google", "meta", "facebook", "linkedin", "netflix", "pinterest", "airbnb", "amazon"})
 
+SEARCH_COMPANIES = frozenset({
+    "linkedin", "google", "meta", "amazon", "airbnb", "pinterest", "spotify", "netflix"
+})
+
 STRONG_TITLE_SCORES: dict[str, float] = {
     "search engineer": 1.0, "ranking engineer": 1.0,
     "relevance engineer": 1.0, "search scientist": 1.0,
@@ -207,9 +211,7 @@ STRONG_TITLE_SCORES: dict[str, float] = {
     "ml engineer": 0.88, "machine learning engineer": 0.88,
     "applied scientist": 0.82, "research engineer": 0.75,
     "principal engineer": 0.82, "staff engineer": 0.82,
-    "senior engineer": 0.72, "data scientist": 0.65,
-    "backend engineer": 0.55, "software engineer": 0.50,
-    "data engineer": 0.45,
+    "senior engineer": 0.72, "data engineer": 0.45,
 }
 
 NON_TECH_TITLES = frozenset({  # [B9] frozenset for O(1) lookup
@@ -239,6 +241,8 @@ SHIP_SIGNALS = frozenset({
     "ranking system", "retrieval system", "recommendation engine",
     "search engine", "embedding service", "vector index", "reranker",
     "search platform", "recommendation platform",
+    "sla", "uptime", "oncall", "latency reduction", "cost reduction",
+    "serving system", "online inference", "production traffic"
 })
 SHIP_SIGNALS_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, SHIP_SIGNALS)) + r')\b')
 
@@ -249,9 +253,9 @@ RESEARCH_SIGNALS = frozenset({
 })
 RESEARCH_SIGNALS_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, RESEARCH_SIGNALS)) + r')\b')
 
-PASS2_POOL_SIZE = 5000
+PASS2_POOL_SIZE = 12000
 FAST_WORDS_RE = re.compile(
-    r'\b(retrieval|recommendation|ranking|search|vector|embedding|nlp|rag|ndcg|faiss|qdrant|pinecone|milvus|elasticsearch|weaviate)\b'
+    r'\b(retrieval|recommendation|ranking|search|vector|embedding|nlp|rag|ndcg|faiss|qdrant|pinecone|milvus|elasticsearch|weaviate|retrieval platform|relevance|matching engine|candidate matching|recommendation pipeline|search quality|personalization|ranking model)\b'
 )
 SHIP_FAST_RE = re.compile(r'\b(shipped|deployed|production|at scale|million|serving|built and)\b')
 
@@ -272,6 +276,60 @@ def parse_date(s: str) -> date | None:
     return None
 
 
+def calculate_actual_yoe(career: list) -> float:
+    """Calculate non-overlapping years of experience."""
+    intervals = []
+    for job in career:
+        start_str = job.get("start_date", "")
+        end_str = job.get("end_date", "")
+        start_dt = parse_date(start_str)
+        
+        end_dt = None
+        if end_str:
+            end_dt = parse_date(end_str)
+        
+        dur = int(job.get("duration_months", 0) or 0)
+        
+        if start_dt and not end_dt and dur > 0:
+            try:
+                y, m = divmod(start_dt.month - 1 + dur, 12)
+                end_dt = start_dt.replace(year=start_dt.year + y, month=m + 1)
+            except ValueError:
+                pass
+                
+        if not start_dt and dur > 0:
+            intervals.append((-1, dur))
+            continue
+            
+        if start_dt:
+            if not end_dt:
+                end_dt = TODAY
+            start_m = start_dt.year * 12 + start_dt.month
+            end_m = end_dt.year * 12 + end_dt.month
+            if end_m > start_m:
+                intervals.append((start_m, end_m))
+            
+    valid_intervals = [i for i in intervals if i[0] != -1]
+    valid_intervals.sort(key=lambda x: x[0])
+    
+    merged = []
+    for interval in valid_intervals:
+        if not merged:
+            merged.append(interval)
+        else:
+            last = merged[-1]
+            if interval[0] <= last[1]:
+                merged[-1] = (last[0], max(last[1], interval[1]))
+            else:
+                merged.append(interval)
+                
+    total_months = sum(i[1] - i[0] for i in merged)
+    for i in intervals:
+        if i[0] == -1:
+            total_months += i[1]
+            
+    return total_months / 12.0
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HONEYPOT DETECTION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -285,7 +343,7 @@ def is_honeypot(candidate: dict) -> bool:
     career   = candidate.get("career_history", []) or []
     skills   = candidate.get("skills", []) or []
     claimed_yoe = float(profile.get("years_of_experience", 0) or 0)
-    actual_yoe  = float(candidate.get("calculated_yoe", 0) or 0)
+    actual_yoe  = calculate_actual_yoe(career)
 
     # 1. Job duration > calendar months since start date (time travel)
     for job in career:
@@ -394,6 +452,8 @@ def fast_score(candidate: dict) -> float:
     if title_hit:  score += 4.0
     if text_hit:   score += 1.0
     if elite_hit:  score += 3.0
+    if PRIMARY_CORE_RE.search(combined):
+        score += 3.0
     score += min(ship_hits * 0.5, 2.0)  # Up to +2.0 for shipping evidence
     return score - score_penalty
 
@@ -422,9 +482,12 @@ def score_skill_fit(skills: list, extra_text: str = "", career: list | None = No
         weight = prof * (1 + endorse / 200.0 + duration / 144.0)
 
         if "rag" in name or "retrieval augmented generation" in name:
-            weight *= 0.60
+            weight *= 0.40
         elif "sentence-transformer" in name or "sentence transformer" in name:
             weight *= 0.75
+
+        if any(kw in name for kw in ("bm25", "learning to rank", "lambdamart", "colbert", "reranking")):
+            weight *= 1.5
 
         total_w += weight
 
@@ -652,7 +715,7 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
 
     # [C6] Fabricated Experience Penalty (moved from honeypot disqualification)
     claimed = float(profile.get("years_of_experience", 0) or 0)
-    actual  = sum(int(j.get("duration_months", 0) or 0) for j in career) / 12.0
+    actual  = calculate_actual_yoe(career)
     if claimed > 3 and actual > 0 and claimed > actual * 2.8:
         penalty += 0.20
 
@@ -985,6 +1048,11 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     vector_hits += len(set(VECTOR_TEXT_RE.findall(full_extra)))
     explicit_hits += len(set(EXPLICIT_VECTOR_RE.findall(full_extra)))
     
+    for job in career:
+        comp = (job.get("company", "") or "").lower()
+        if any(sc in comp for sc in SEARCH_COMPANIES):
+            primary_hits += 1.0
+
     full_text = full_extra + " " + " ".join(j.get("description", "") or "" for j in career[:4]).lower()
 
     # 3. Search/Retrieval Expertise (30%)
@@ -993,7 +1061,7 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     generic_ml = any(kw in title_lower for kw in ("data scientist", "machine learning", "ml engineer", "data engineer"))
     generic_penalty = 0.3 if generic_ml and primary_hits == 0 and explicit_hits == 0 else 0.0
     
-    sr_score = skill_fit + (primary_hits * 0.30) + (secondary_hits * 0.15) + (eval_hits * 0.15) + hybrid_search_bonus + implicit_ltr_bonus - generic_penalty
+    sr_score = skill_fit + (primary_hits * 0.30) + (secondary_hits * 0.15) + (eval_hits * 0.25) + hybrid_search_bonus + implicit_ltr_bonus - generic_penalty
     features["search_retrieval"] = min(1.0, max(0.0, sr_score))
 
     # 4. Production Experience (15%)
@@ -1005,6 +1073,9 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
 
     # 5. Vector DB Expertise (20%)
     features["vector_search"] = min(1.0, (explicit_hits * 0.40) + (vector_hits * 0.15))
+    
+    if primary_hits > 0 and eval_hits > 0 and explicit_hits > 0:
+        features["search_retrieval"] = min(1.0, features["search_retrieval"] + 0.20)
 
     # 4. Notice Period (15%)
     if notice <= 15:       notice_score = 1.00
@@ -1229,6 +1300,6 @@ if __name__ == "__main__":
 # [B7] Date parsing only handled %Y-%m-%d, no fallback
 #      → parse_date() now tries 5 formats with graceful failure
 # [B8] JSON-array branch called json.loads(465MB_string) — OOM risk
-#      → array branch now uses json.load(f) (streaming parser) on small files only
+#      → array branch now uses json.load(f) (full load) on small files only
 # [B9] NON_TECH_TITLES was a plain set (O(n) hash); changed to frozenset (marginal but cleaner)
 # [B10] score_behavioral could return >1.0 if saves_score pushed it over; added clamp()
