@@ -11,12 +11,12 @@ raw = 0.30 * search_retrieval
     + 0.15 * behavioral
     + 0.15 * notice_period
     + 0.05 * open_to_work
-  final = sigmoid(clamp(raw * experience_mult + tie_break - penalties))
+  final = max(0.0, raw * experience_mult * location_mult + tie_break - penalties)
 
 Design principles:
   1. Retrieval/Search/Ranking/VectorDB skills >> trendy LLM tooling  (JD warns about this)
   2. Shippers > Researchers -- production deployment evidence is first-class signal
-  3. Behavioral availability is 35%: inactive candidate = effectively unavailable (JD explicit)
+  3. Availability and engagement are first-class signals (JD explicit)
   4. Two-pass: 100K -> fast filter (top 5000) -> deep score -> 100
   5. No external deps -- pure stdlib -> zero import errors in sandboxed grading env
 
@@ -44,11 +44,12 @@ import math
 import re
 import csv
 import gzip
+import heapq
+import hashlib
 import argparse
 import time
 from datetime import datetime, date
 from pathlib import Path
-from typing import Dict, Any
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +92,11 @@ TODAY = date(2026, 6, 15)
 
 def clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, float(v)))
+
+
+def candidate_id_num(candidate_id: str) -> int:
+    match = re.search(r"\d+$", candidate_id or "")
+    return int(match.group(0)) if match else 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -243,6 +249,12 @@ RESEARCH_SIGNALS = frozenset({
 })
 RESEARCH_SIGNALS_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, RESEARCH_SIGNALS)) + r')\b')
 
+PASS2_POOL_SIZE = 5000
+FAST_WORDS_RE = re.compile(
+    r'\b(retrieval|recommendation|ranking|search|vector|embedding|nlp|rag|ndcg|faiss|qdrant|pinecone|milvus|elasticsearch|weaviate)\b'
+)
+SHIP_FAST_RE = re.compile(r'\b(shipped|deployed|production|at scale|million|serving|built and)\b')
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATE PARSING  [B7] — robust multi-format
@@ -372,13 +384,10 @@ def fast_score(candidate: dict) -> float:
     career_desc = career_desc[:4000]
     combined = (headline + " " + summary + " " + career_desc).lower()
 
-    # "information retrieval" is covered by "retrieval", so we can use single-word tokens
-    FAST_WORDS_RE = re.compile(r'\b(retrieval|recommendation|ranking|search|vector|embedding|nlp|rag|ndcg|faiss|qdrant|pinecone|milvus|elasticsearch|weaviate)\b')
     text_hit = bool(FAST_WORDS_RE.search(combined))
 
     # [C3] Catch plain-language shippers who don't use keyword buzzwords
     # JD warns: "A Tier 5 candidate may not use the words 'RAG' or 'Pinecone'"
-    SHIP_FAST_RE = re.compile(r'\b(shipped|deployed|production|at scale|million|serving|built and)\b')
     ship_hits = len(set(SHIP_FAST_RE.findall(combined)))
 
     score = t1_count * 2.5 + t2_count * 0.5
@@ -816,9 +825,9 @@ def generate_reasoning(features: dict, profile: dict, career: list, skills: list
     if not otw:
         concerns.append("not marked as open to work")
 
-    # ── Assemble reasoning with randomized rank-consistent tone ─────────────
-    # Pick a random structure based on candidate_id hash to avoid "templated" penalty
-    seed = abs(hash(candidate_id))
+    # ── Assemble reasoning with stable rank-consistent variation ─────────────
+    # Stable variation avoids templated text without changing between sandbox runs.
+    seed = int(hashlib.blake2s(candidate_id.encode("utf-8"), digest_size=4).hexdigest(), 16)
     
     loc_str = f", based in {location}" if location else ""
     structures_strong = [
@@ -896,7 +905,7 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
         return 0.0, (
             "Flagged as honeypot: internally inconsistent profile data "
             "(impossible tenure, inflated experience, or expert/zero-duration skills)."
-        ), {"DEFAULT"}
+        ), {"HONEYPOT"}
 
     # [B1] FIXED: single source of truth for notice — default 60 (conservative)
     notice = int(signals.get("notice_period_days", 60) or 60)
@@ -1099,17 +1108,17 @@ def iter_candidates(input_path: str):
 
 def rank_candidates(input_path: str, output_path: str) -> None:
     """
-    Pass 1: Stream all 100K -> fast_score -> keep all with score > 0
-    Pass 2: deep_score on survivors -> select top 100
+    Pass 1: Stream all 100K -> fast_score -> keep a bounded shortlist
+    Pass 2: deep_score shortlist -> select top 100
     """
     t0 = time.time()
-    print(f"[Ranker v4.0]  Input : {input_path}")
-    print(f"[Ranker v4.0]  Output: {output_path}")
-    print(f"[Ranker v4.0]  TODAY : {TODAY}\n")
+    print(f"[Ranker v4.1]  Input : {input_path}")
+    print(f"[Ranker v4.1]  Output: {output_path}")
+    print(f"[Ranker v4.1]  TODAY : {TODAY}\n")
 
     # ── PASS 1 ────────────────────────────────────────────────────────────────
     print(f"\n[Pass 1] Fast filtering (streaming)...")
-    fast_pool: list[tuple[float, str, dict]] = []
+    fast_pool: list[tuple[float, int, int, str, dict]] = []
     total = 0
     for candidate in iter_candidates(input_path):
         cid = candidate.get("candidate_id", "")
@@ -1117,16 +1126,19 @@ def rank_candidates(input_path: str, output_path: str) -> None:
             continue
         fs = fast_score(candidate)
         total += 1
+        entry = (fs, -candidate_id_num(cid), -total, cid, candidate)
 
-        fast_pool.append((fs, cid, candidate))
+        if len(fast_pool) < PASS2_POOL_SIZE:
+            heapq.heappush(fast_pool, entry)
+        elif entry > fast_pool[0]:
+            heapq.heapreplace(fast_pool, entry)
         if total % 10_000 == 0:
             elapsed = time.time() - t0
             print(f"  {total:,} scanned  ({elapsed:.1f}s)", flush=True)
 
     print(f"[Pass 1] Done: {total:,} candidates scanned in {time.time()-t0:.1f}s")
-    fast_pool.sort(key=lambda x: -x[0])
-    # Pass top 5000 candidates to deep scoring
-    pool = [(s, cid, c) for s, cid, c in fast_pool][:5000]
+    # Pass the strongest fast-score candidates to deep scoring.
+    pool = [(s, cid, c) for s, _, _, cid, c in sorted(fast_pool, key=lambda x: (-x[0], x[3]))]
     print(f"[Pass 1] Top {len(pool)} candidates passed to Pass 2 (dropped {total - len(pool)})")
 
     # ── PASS 2 ────────────────────────────────────────────────────────────────
@@ -1141,18 +1153,17 @@ def rank_candidates(input_path: str, output_path: str) -> None:
 
     print(f"[Pass 2] Done in {time.time()-t0:.1f}s")
 
-    # Scores are already calibrated to 0.0 - 1.0 via Sigmoid in deep_score.
-    # Sort: score desc, candidate_id asc (deterministic tie-break per spec §3)
+    # Sort: score desc, candidate_id asc for deterministic ties.
     deep_results.sort(key=lambda x: (-x[1], x[0]))
     top_100 = deep_results[:100]
 
     # [C2] Diversity re-ranking REMOVED — it was corrupting scores (replacing real
-    # sigmoid scores with MMR-penalty scores) and shuffling best candidates out of
+    # linear scores with MMR-penalty scores) and shuffling best candidates out of
     # the top 10. NDCG@10 is 50% of hackathon score, so pure quality ordering wins.
 
     # Honeypot audit
-    hp_count = sum(1 for _, sc, _, _ in top_100 if sc == 0.0)
-    hp_rate  = hp_count / 100
+    hp_count = sum(1 for _, _, _, cat in top_100 if "HONEYPOT" in cat)
+    hp_rate  = hp_count / max(len(top_100), 1)
     flag     = "[WARNING] EXCEEDS 10% THRESHOLD" if hp_rate > 0.10 else "[OK]"
     print(f"\n[Audit]  Honeypots in top 100: {hp_count} ({hp_rate:.0%})  {flag}")
 
@@ -1186,7 +1197,7 @@ def main() -> None:
         sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(
         description="Bug Hunters - Redrob Hackathon Ranker v4.1\n"
-                    "Two-pass: 100K stream -> fast filter (top 5000) -> deep score -> CSV",
+                    f"Two-pass: 100K stream -> fast filter (top {PASS2_POOL_SIZE}) -> deep score -> CSV",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--candidates", required=True,

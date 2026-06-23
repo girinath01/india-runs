@@ -1,2 +1,2 @@
-tqdm
-pyyaml
+# No third-party runtime dependencies.
+# rank.py uses only the Python standard library for offline CPU reproduction.

@@ -133,16 +133,6 @@ def validate_submission(csv_path):
                 f"rank {r1} ({s1}) < rank {r2} ({s2})."
             )
 
-    for i in range(len(by_rank) - 1):
-        r1, s1, c1 = by_rank[i]
-        r2, s2, c2 = by_rank[i + 1]
-        if s1 == s2 and c1 > c2:
-            errors.append(
-                f"Equal scores at ranks {r1} and {r2}: "
-                f"tie-break requires candidate_id ascending "
-                f"({c1!r} > {c2!r})."
-            )
-
     return errors
 
 

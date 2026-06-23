@@ -1,30 +1,32 @@
-# Redrob Hackathon — Submission Metadata
+# Redrob Hackathon - Submission Metadata
 # Team: Bug Hunters
 
-team_name: "bug-hunters"
+team_name: "Bug Hunters"
 
 primary_contact:
   name: "Girinath K"
   email: "kgns859@gmail.com"
-  phone: "+91-XXXXXXXXXX"
+  phone: "TODO: add phone before portal submission"
 
 team_members:
   - name: "Girinath K"
     email: "kgns859@gmail.com"
     role: "Team Lead / ML Engineer"
 
-github_repo: "https://github.com/girinath01/india-runs"
+github_repo: "https://github.com/girinath01/india-runs.git"
+github_branch: "master"
 
-sandbox_link: "https://huggingface.co/spaces/YOUR_USERNAME/redrob-ranker"
+sandbox_link: "TODO: add HuggingFace/Streamlit/Replit/Colab/Docker/Binder link before portal submission"
 
 reproduce_command: "python rank.py --candidates ./candidates.jsonl --out ./bug_hunters.csv"
+validation_command: "python validate_submission.py ./bug_hunters.csv"
 
 compute:
-  platform: "Windows 11 / Local Machine"
+  platform: "CPU-only local/Docker environment"
   cpu_cores: 8
   ram_gb: 16
-  python_version: "3.11"
-  os: "Windows 11"
+  python_version: "3.11+"
+  os: "Windows 11 / Linux Docker"
   uses_gpu_for_inference: false
   has_network_during_ranking: false
   pre_computation_required: false
@@ -32,25 +34,22 @@ compute:
 
 ai_tools_used:
   - "Claude (Antigravity)"
+  - "OpenAI Codex"
 
 ai_usage_summary: |
-  Used Claude (Antigravity) for architecture discussion, code review, and
-  structuring the multi-signal scoring framework. All JD analysis, signal
-  design decisions, weight calibration, and disqualifier logic were built
-  and validated by the team. No candidate data was fed to any LLM.
-  The ranking runs entirely offline with no API calls at inference time.
+  AI tools were used for code review, documentation cleanup, and ranking
+  pipeline hardening. No candidate data is sent to hosted LLM APIs. The ranker
+  runs entirely offline using deterministic standard-library heuristics.
 
 methodology_summary: |
-  Multi-signal hybrid scorer — 2 passes, no GPU, no network.
-  Pass 1 filters strictly on positive fast_score (drops obvious non-tech).
-  Pass 2 deep scores top 500 candidates.
-  Search/Retrieval (45%): LTR, BM25, and IR explicit hits.
-  Vector DBs (25%): Massive boosts for explicit Vector DB operational experience.
-  Production experience (20%): Shipped/scaled/deployed signals vs purely academic.
-  Behavioral Base (10%): Recency, github activity, connections, assessments.
-  Massive Uncapped Penalties: Not open to work, extreme notice periods, job hoppers,
-  and purely consulting-only careers receive -0.35 to -0.40 linear penalties to mathematically drop them out.
-  Honeypot detection via 4 impossibility checks. Runtime ~23s for 100K candidates on CPU.
+  Two-pass offline heuristic ranker. Pass 1 streams all candidates and keeps the
+  top 5,000 by fast title, skill, search/vector, production, and elite-company
+  signals. Pass 2 deeply scores retrieval/ranking/evaluation fit, explicit vector
+  DB experience, production shipping evidence, behavioral availability, notice
+  period, open-to-work, location, and JD red flags. Honeypot checks catch
+  impossible tenure, inflated experience, expert zero-duration skills, domain
+  conflicts, and impossible durations for recent technologies. Output is a
+  deterministic UTF-8 top-100 CSV.
 
 declarations:
   read_submission_spec: true
@@ -58,3 +57,5 @@ declarations:
   no_collusion: true
   honeypot_check_done: true
   reproduction_tested: true
+  no_network_calls: true
+  no_gpu_required: true
