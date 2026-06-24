@@ -17,7 +17,7 @@ Design principles:
   1. Retrieval/Search/Ranking/VectorDB skills >> trendy LLM tooling  (JD warns about this)
   2. Shippers > Researchers -- production deployment evidence is first-class signal
   3. Availability and engagement are first-class signals (JD explicit)
-  4. Two-pass: 100K -> fast filter (top 5000) -> deep score -> 100
+  4. Two-pass: 100K -> fast filter (top 12000) -> deep score -> 100
   5. No external deps -- pure stdlib -> zero import errors in sandboxed grading env
 
 FIXED BUGS vs v2 (see CHANGELOG at bottom):
@@ -50,7 +50,6 @@ import argparse
 import time
 from datetime import datetime, date
 from pathlib import Path
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SCHEMA  (what we expect in each candidate record)
@@ -177,10 +176,88 @@ PRIMARY_CORE_RE = re.compile(r'\b(information retrieval|learning to rank|ltr|lam
 SECONDARY_CORE_RE = re.compile(r'\b(ranking system|recommendation system|candidate ranking|personalization|relevance|matching engine|elasticsearch|opensearch)\b')
 EXPLICIT_VECTOR_RE = re.compile(r'\b(faiss|pinecone|qdrant|weaviate|milvus|pgvector)\b')
 VECTOR_TEXT_RE = re.compile(r'\b(vector search|vector database|chroma|ann|hnsw)\b')
+# TIERED SKILL DEFINITIONS  (from JD analysis)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tier 1 — core JD requirements: retrieval, search, ranking, vector DBs, eval
+TIER1_SKILLS = frozenset({
+    "retrieval", "information retrieval", "dense retrieval", "sparse retrieval",
+    "hybrid retrieval", "hybrid search", "semantic search", "vector search",
+    "search engine", "search ranking", "search system", "search infrastructure",
+    "recommendation system", "recommender", "recommender system", "ranking system",
+    "learning to rank", "ltr", "lambdamart", "lambdarank", "ranknet",
+    "bi encoder", "cross encoder",
+    "faiss", "elasticsearch", "opensearch", "qdrant", "milvus",
+    "weaviate", "pinecone", "pgvector", "vespa", "annoy", "scann", "chroma",
+    "vector database", "vector db", "vector store", "vector index",
+    "ann", "approximate nearest neighbor", "hnsw",
+    "reranking", "re ranking", "reranker", "colbert",
+    "bm25", "tfidf", "tf idf",
+    "ndcg", "mrr", "mean reciprocal rank", "map", "mean average precision",
+    "a b testing", "ab testing", "offline evaluation", "online evaluation",
+    "eval framework", "evaluation framework",
+})
+
+# Tier 2 — strong supporting skills
+TIER2_SKILLS = frozenset({
+    "rag", "retrieval augmented generation",
+    "embeddings", "embedding", "sentence transformers", "sentence transformer",
+    "text embedding", "openai embeddings", "bge", "e5 model", "dense embedding",
+    "nlp", "natural language processing", "language model", "text classification",
+    "bert", "transformers", "huggingface", "hugging face",
+    "pytorch", "tensorflow", "keras", "jax",
+    "mlops", "model deployment", "model serving", "inference",
+    "feature engineering", "feature store",
+    "distributed systems", "distributed training",
+    "mlflow", "wandb", "ray", "dask",
+    "xgboost", "lightgbm", "gradient boosting",
+    "scikit learn", "sklearn",
+    "python", "fastapi", "flask", "docker", "kubernetes",
+    "spark", "kafka", "airflow",
+    "aws", "gcp", "azure",
+})
+
+# Tier 3 — trendy LLM tooling (low weight)
+# JD warns: "If your experience consists of LangChain + OpenAI — probably not"
+TIER3_SKILLS = frozenset({
+    "langchain", "lang chain",
+    "prompt engineering", "instruction tuning",
+    "qlora", "lora", "peft", "fine tuning", "finetuning",
+    "llm", "large language model", "generative ai",
+    "openai", "chatgpt", "gpt",
+    "rlhf",
+})
+
+# Disqualifying domain focus — wrong field, JD is explicit
+DISQUALIFYING_SKILLS = frozenset({
+    "computer vision", "image classification", "object detection",
+    "yolo", "convolutional", "image segmentation",
+    "opencv",
+    "speech recognition", "asr", "tts", "text to speech", "speech synthesis",
+    "audio processing", "sound classification", "voice recognition",
+    "robotics", "ros", "autonomous driving", "lidar", "slam",
+    "photoshop", "illustrator", "figma", "canva",
+    "accounting", "tally", "gst", "salesforce", "crm",
+    "seo", "content writing", "copywriting",
+    "six sigma", "lean", "kaizen",
+    "solidworks", "autocad",
+})
+
+TIER1_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(TIER1_SKILLS, key=len, reverse=True))) + r')\b')
+TIER2_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(TIER2_SKILLS, key=len, reverse=True))) + r')\b')
+TIER3_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(TIER3_SKILLS, key=len, reverse=True))) + r')\b')
+DISQ_REGEX = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(DISQUALIFYING_SKILLS, key=len, reverse=True))) + r')\b')
+
+# [H1] Module-level compiled regexes for deep_score (avoids 18K re-compilations in Pass 2)
+PRIMARY_CORE_RE = re.compile(r'\b(information retrieval|learning to rank|ltr|lambdamart|bm25|semantic search|candidate matching|search quality)\b')
+SECONDARY_CORE_RE = re.compile(r'\b(ranking system|recommendation system|candidate ranking|personalization|relevance|matching engine|elasticsearch|opensearch)\b')
+EXPLICIT_VECTOR_RE = re.compile(r'\b(faiss|pinecone|qdrant|weaviate|milvus|pgvector)\b')
+VECTOR_TEXT_RE = re.compile(r'\b(vector search|vector database|chroma|ann|hnsw)\b')
 HR_TEXT_RE = re.compile(r'\b(hr tech|recruiting tech|talent acquisition platform|marketplace product|job board)\b')
 PROD_TEXT_RE = re.compile(r'\b(scale|shipped|deployed|productionized|enterprise|latency|qps|inference optimization|tensorrt|vllm|distributed systems|ray|spark)\b')
 INFRA_TEXT_RE = re.compile(r'\b(search infra|retrieval pipeline|relevance|indexing|ranking optimization)\b')
 EVAL_TEXT_RE = re.compile(r'\b(ndcg|mrr|mean average precision|a/b test|ab testing|offline evaluation|online evaluation)\b')
+RESEARCH_HEAVY_RE = re.compile(r'\b(paper|publication|thesis|arxiv|academic)\b')
 
 CONSULTING_INDUSTRIES = frozenset({
     "it services", "it consulting", "consulting",
@@ -190,11 +267,15 @@ CONSULTING_INDUSTRIES = frozenset({
 CONSULTING_NAMES = frozenset({
     "tcs", "tata consultancy", "infosys", "wipro", "accenture", "cognizant",
     "capgemini", "hcl", "tech mahindra", "mphasis", "hexaware", "mindtree",
-    "ltimindtree", "lti", "larsen toubro infotech", "niit technologies",
-    "persistent systems", "cyient", "zensar", "birlasoft", "coforge",
-    "kpit", "mastech", "firstsource", "wns", "genpact",
+    "l&t infotech", "lti", "cognizant technology solutions", "atos",
+    "niit technologies", "persistent systems", "cyient", "zensar", 
+    "birlasoft", "coforge", "kpit", "mastech", "firstsource", "wns", "genpact",
 })
 CONSULTING_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, CONSULTING_INDUSTRIES | CONSULTING_NAMES)) + r')\b')
+
+PRODUCT_TECH_COMPANIES = frozenset({
+    "swiggy", "zomato", "razorpay", "meesho", "flipkart", "ola", "gojek", "grab", "zepto", "uber", "doordash", "instacart"
+})
 
 ELITE_SEARCH_COMPANIES = frozenset({"google", "meta", "facebook", "linkedin", "netflix", "pinterest", "airbnb", "amazon"})
 
@@ -727,7 +808,6 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
 
     # Research-heavy career (pure academic, no production)
     if career:
-        RESEARCH_HEAVY_RE = re.compile(r'\b(paper|publication|thesis|arxiv|academic)\b')
         research_heavy_count = sum(
             1 for job in career
             if len(set(RESEARCH_HEAVY_RE.findall((job.get("description", "") or "").lower()))) >= 2
@@ -736,10 +816,12 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
             penalty += 0.18
 
         # Title Chaser / Job Hopper Penalty
-        if len(career) >= 3:
-            total_months = sum(max(1, int(j.get("duration_months", 1) or 1)) for j in career)
-            avg_tenure = total_months / len(career)
-            if avg_tenure < 18:
+        recent_jobs = career[:3]
+        if len(recent_jobs) >= 3:
+            total_months = sum(max(1, int(j.get("duration_months", 1) or 1)) for j in recent_jobs)
+            avg_tenure = total_months / len(recent_jobs)
+            current_job_dur = int(career[0].get("duration_months", 1) or 1) if career else 0
+            if avg_tenure < 18 and current_job_dur < 36:
                 penalty += 0.35
 
     # LangChain + OpenAI only with NO retrieval/search skills at all
@@ -758,11 +840,8 @@ def compute_hard_penalties(profile: dict, career: list, skills: list, signals: d
 
     # [C5] Strict Behavioral Penalties for Unavailability
     otw = signals.get("open_to_work_flag", False)
-    notice = int(signals.get("notice_period_days", 60) or 60)
     if not otw:
-        penalty += 0.40  # Massive penalty for not open to work
-    if notice > 60:
-        penalty += 0.35  # Massive penalty for long notice
+        penalty += 0.04  # Small nudge only — main signal is already in features["open_to_work"]
 
     return clamp(penalty, 0.0, 0.85)
 
@@ -950,6 +1029,41 @@ def generate_reasoning(features: dict, profile: dict, career: list, skills: list
 
 
 
+def score_career_trajectory(career: list) -> tuple[float, float]:
+    """Analyze career progression, returning (penalty, reward)."""
+    if not career:
+        return 0.0, 0.0
+    
+    levels = {"intern": 1, "trainee": 1, "junior": 2, "jr": 2, "senior": 4, "lead": 5, "staff": 5, "principal": 5}
+    
+    trajectory = []
+    for job in reversed(career):
+        title = (job.get("title", "") or "").lower()
+        lvl = 3
+        for k, v in levels.items():
+            if k in title:
+                lvl = max(lvl, v) if k in ("lead", "staff", "principal") else v
+        dur = max(1, int(job.get("duration_months", 1) or 1))
+        trajectory.append((lvl, dur))
+        
+    penalty = 0.0
+    reward = 0.0
+    for i in range(1, len(trajectory)):
+        prev_lvl, prev_dur = trajectory[i-1]
+        curr_lvl, curr_dur = trajectory[i]
+        
+        if curr_lvl > prev_lvl and prev_dur < 18 and curr_dur < 18:
+            penalty += 0.25
+            
+        if curr_lvl >= 4 and prev_lvl <= 2 and (prev_dur + curr_dur) < 24:
+            penalty += 0.35
+            
+        if curr_lvl > prev_lvl and prev_dur >= 24:
+            reward += 0.10
+            
+    return clamp(penalty, 0.0, 0.50), min(0.30, reward)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DEEP SCORER  (called only on Pass 2 shortlist)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -991,6 +1105,7 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     prod_hits = 0.0
     vector_hits = 0.0
     explicit_hits = 0.0
+    infra_hits = 0.0
     hybrid_search_bonus = 0.0
     implicit_ltr_bonus = 0.0
     
@@ -1016,6 +1131,8 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
         pr_hits = len(set(PROD_TEXT_RE.findall(job_text)))
         v_hits = len(set(VECTOR_TEXT_RE.findall(job_text)))
         ex_hits = len(set(EXPLICIT_VECTOR_RE.findall(job_text)))
+        i_hits = len(set(INFRA_TEXT_RE.findall(job_text)))
+        h_hits = len(set(HR_TEXT_RE.findall(job_text)))
         
         # Co-occurrence bonuses
         if pr_hits > 0 and (p_hits > 0 or ex_hits > 0):
@@ -1034,24 +1151,29 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
                 implicit_ltr_bonus += (0.10 * decay)
         
         primary_hits += (p_hits * decay)
-        secondary_hits += (s_hits * decay)
+        secondary_hits += (s_hits * decay) + (h_hits * decay * 0.5)
         eval_hits += (e_hits * decay)
         vector_hits += (v_hits * decay)
         explicit_hits += (ex_hits * decay)
+        infra_hits += (i_hits * decay)
 
     # 2. Add headline/summary and skills hits (no decay)
     skill_names = " ".join([s.get("name", "").lower() for s in skills])
     full_extra = extra_text.lower() + " " + skill_names
     primary_hits += len(set(PRIMARY_CORE_RE.findall(full_extra)))
-    secondary_hits += len(set(SECONDARY_CORE_RE.findall(full_extra)))
+    secondary_hits += len(set(SECONDARY_CORE_RE.findall(full_extra))) + len(set(HR_TEXT_RE.findall(full_extra))) * 0.5
     eval_hits += len(set(EVAL_TEXT_RE.findall(full_extra)))
     vector_hits += len(set(VECTOR_TEXT_RE.findall(full_extra)))
     explicit_hits += len(set(EXPLICIT_VECTOR_RE.findall(full_extra)))
+    infra_hits += len(set(INFRA_TEXT_RE.findall(full_extra)))
     
+    product_company_bonus = 0.0
     for job in career:
         comp = (job.get("company", "") or "").lower()
         if any(sc in comp for sc in SEARCH_COMPANIES):
             primary_hits += 1.0
+        if any(pc in comp for pc in PRODUCT_TECH_COMPANIES):
+            product_company_bonus += 0.25
 
     full_text = full_extra + " " + " ".join(j.get("description", "") or "" for j in career[:4]).lower()
 
@@ -1061,8 +1183,24 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     generic_ml = any(kw in title_lower for kw in ("data scientist", "machine learning", "ml engineer", "data engineer"))
     generic_penalty = 0.3 if generic_ml and primary_hits == 0 and explicit_hits == 0 else 0.0
     
-    sr_score = skill_fit + (primary_hits * 0.30) + (secondary_hits * 0.15) + (eval_hits * 0.25) + hybrid_search_bonus + implicit_ltr_bonus - generic_penalty
+    sr_score = skill_fit + (primary_hits * 0.30) + (secondary_hits * 0.15) + (eval_hits * 0.25) + (infra_hits * 0.20) + hybrid_search_bonus + implicit_ltr_bonus - generic_penalty
     features["search_retrieval"] = min(1.0, max(0.0, sr_score))
+
+    jd_vector = {"retrieval": 5, "ranking": 5, "vector": 4, "evaluation": 3, "production": 3}
+    candidate_vector = {
+        "retrieval": primary_hits,
+        "ranking": secondary_hits,
+        "vector": explicit_hits + vector_hits,
+        "evaluation": eval_hits,
+        "production": prod_hits,
+    }
+    
+    dot = sum(candidate_vector[k] * jd_vector[k] for k in candidate_vector)
+    norm1 = math.sqrt(sum(v*v for v in candidate_vector.values()))
+    norm2 = math.sqrt(sum(v*v for v in jd_vector.values()))
+    semantic_similarity = (dot / (norm1 * norm2)) if (norm1 * norm2) > 0 else 0.0
+    
+    features["search_retrieval"] = min(1.0, features["search_retrieval"] + (0.10 * semantic_similarity))
 
     # 4. Production Experience (15%)
     is_research = any(kw in full_text for kw in ("research", "academic", "paper", "publication", "thesis"))
@@ -1077,7 +1215,7 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     if primary_hits > 0 and eval_hits > 0 and explicit_hits > 0:
         features["search_retrieval"] = min(1.0, features["search_retrieval"] + 0.20)
 
-    # 4. Notice Period (15%)
+    # 4. Notice Period
     if notice <= 15:       notice_score = 1.00
     elif notice <= 30:     notice_score = 0.90
     elif notice <= 60:     notice_score = 0.40
@@ -1085,19 +1223,25 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
     else:                  notice_score = 0.00
     features["notice_period"] = notice_score
 
-    # 5. Open to Work (5%)
+    # 5. Open to Work
     otw = 1.0 if signals.get("open_to_work_flag", False) else 0.0
     features["open_to_work"] = otw
+    
+    # Behavioral Momentum Bonus
+    if otw > 0 and signals.get("last_active_date", ""):
+        last_dt = parse_date(signals.get("last_active_date", ""))
+        if last_dt and (TODAY - last_dt).days <= 7:
+            features["open_to_work"] += 0.05
 
     # ==========================================
     # STAGE 2: Weighted Linear Scoring
     # ==========================================
     raw_score = (
-        0.30 * features["search_retrieval"] +
+        0.38 * features["search_retrieval"] +
         0.20 * features["vector_search"] +
         0.15 * features["production"] +
         0.15 * behavioral +
-        0.15 * features["notice_period"] +
+        0.07 * features["notice_period"] +
         0.05 * features["open_to_work"]
     )
 
@@ -1116,10 +1260,19 @@ def deep_score(candidate: dict) -> tuple[float, str, set[str]]:
         days = (TODAY - last_dt).days
         recent_activity = max(0.0, 1.0 - (days / 180.0))
         
-    github_score = int(signals.get("github_activity_score", 0) or 0) / 100.0
+    github_score = int(signals.get("github_activity_score", 0) or 0)
+    endorse_sum = sum(int(s.get("endorsements", 0) or 0) for s in skills)
+    community_score = min(1.0, (github_score / 100.0) * 0.7 + (min(endorse_sum, 100) / 100.0) * 0.3)
+    
+    actual_yoe = calculate_actual_yoe(career)
+    if actual_yoe > 5 and github_score <= 0 and not is_research:
+        penalties += 0.15  # 5+ YOE closed-source penalty
+        
+    trajectory_penalty, trajectory_reward = score_career_trajectory(career)
+    penalties += trajectory_penalty
     
     cat_tie = 0.001 * (primary_hits + explicit_hits)
-    tie_break = (0.005 * recent_activity) + (0.003 * github_score) + cat_tie
+    tie_break = (0.005 * recent_activity) + (0.003 * community_score) + cat_tie + product_company_bonus + trajectory_reward
     
     penalized_score = max(0.0, raw_score + tie_break - penalties)
     
@@ -1283,7 +1436,7 @@ if __name__ == "__main__":
     main()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHANGELOG  (v2 → v2.1)
+# CHANGELOG  (v4.0 → v4.1)
 # ─────────────────────────────────────────────────────────────────────────────
 # [B1] Double `notice` variable with different defaults (60 vs 0) in deep_score
 #      → unified to single variable with default 60
