@@ -79,7 +79,15 @@ python validate_submission.py ./bug_hunters.csv
 ```
 
 ### Files Overview
-* `rank.py`: The main offline ranking pipeline.
+* `rank.py`: The main CLI wrapper script to execute the pipeline.
+* `src/`: Core modular package containing the ranking engine.
+  * `schemas.py`: Data models and `dataclass` definitions.
+  * `constants.py`: Taxonomy definitions, compiled regular expressions, and configuration constants.
+  * `utils.py`: Utility functions like date parsers and text extraction logic.
+  * `fast_filter.py`: Stage 1 streaming heuristics (`fast_score`) and honeypot detection.
+  * `analyzers.py`: Independent analyzer functions and master `extract_features` merger.
+  * `scoring.py`: Central scoring logic, penalty computation, and reasoning generation.
+  * `pipeline.py`: Pipeline orchestrator that runs the two-stage execution flow.
 * `validate_submission.py`: CSV format validator checking official Redrob submission rules.
 * `requirements.txt`: Standard library runtime verification.
 * `submission_metadata.yaml`: Team and environment reproduction metadata.
