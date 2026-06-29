@@ -1,10 +1,11 @@
 import gradio as gr
 from src.pipeline import rank_candidates
 import os
+import pandas as pd
 
 def process_file(file_obj):
     if file_obj is None:
-        return None
+        return None, None
     
     # Handle both string paths and Gradio File objects
     input_path = file_obj if isinstance(file_obj, str) else file_obj.name
@@ -12,14 +13,18 @@ def process_file(file_obj):
     
     try:
         rank_candidates(input_path, output_path)
-        return output_path
+        df = pd.read_csv(output_path)
+        return df, output_path
     except Exception as e:
         raise gr.Error(f"Error during ranking: {str(e)}")
 
 demo = gr.Interface(
     fn=process_file,
     inputs=gr.File(label="Upload candidates.jsonl (or .json)", file_types=[".jsonl", ".json", ".gz"]),
-    outputs=gr.File(label="Download Ranked CSV"),
+    outputs=[
+        gr.Dataframe(label="Top Candidates Preview"),
+        gr.File(label="Download Ranked CSV")
+    ],
     title="Bug Hunters - Redrob Ranker v6.0",
     description="Upload a sample of candidates to rank them. The system will process them through the Two-Pass Filter Engine and output a `submission.csv` file."
 )
