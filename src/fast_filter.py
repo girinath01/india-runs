@@ -8,53 +8,70 @@ def is_honeypot(candidate: dict) -> bool:
     skills      = candidate.get("skills", []) or []
     claimed_yoe = float(profile.get("years_of_experience", 0) or 0)
     actual_yoe  = calculate_actual_yoe(career)
+    
+    suspicion_score = 0
 
+    # 1. Chronological Impossibility (Instant fail +4)
     for job in career:
         start_dt = parse_date(job.get("start_date", ""))
         stated   = int(job.get("duration_months", 0) or 0)
         if start_dt and stated > 0:
             max_possible = (TODAY.year - start_dt.year) * 12 + (TODAY.month - start_dt.month) + 3
             if stated > max_possible + 6:
-                return True
+                suspicion_score += 4
+                break
 
+    # 2. Career Math Discrepancies
     if actual_yoe > claimed_yoe + 3.0 and actual_yoe > 10.0:
-        return True
+        suspicion_score += 1
+    if 0 < claimed_yoe < 10 and any(int(j.get("duration_months", 0) or 0) > 240 for j in career):
+        suspicion_score += 2
 
-    if skills and claimed_yoe <= 10.0 and actual_yoe <= 10.0:
-        expert_advanced = [s for s in skills if str(s.get("proficiency", "")).lower() in ("expert", "advanced")]
-        zero_evidence   = sum(1 for s in expert_advanced if float(s.get("duration_months", 0) or 0) <= 0.0)
-        if len(expert_advanced) >= 20 and zero_evidence >= 10:
-            return True
-        if len(expert_advanced) >= 30 and zero_evidence >= 20:
-            return True
-
-    expert_advanced = [s for s in skills if s.get("proficiency") in ("expert", "advanced")]
+    # 3. Skill Spamming / Domain Conflict
+    expert_advanced = [s for s in skills if str(s.get("proficiency", "")).lower() in ("expert", "advanced")]
     if len(expert_advanced) >= 20:
         zero_evidence = sum(
             1 for s in expert_advanced
-            if int(s.get("duration_months", 0) or 0) == 0 and int(s.get("endorsements", 0) or 0) == 0
+            if float(s.get("duration_months", 0) or 0) <= 0.0 and int(s.get("endorsements", 0) or 0) == 0
         )
         if zero_evidence >= 10:
-            return True
+            suspicion_score += 2
+        elif zero_evidence >= 20:
+            suspicion_score += 3
+            
         names = " ".join(s.get("name", "").lower() for s in expert_advanced)
         has_non_tech = any(re.search(rf"\b{kw}\b", names) for kw in ("accounting", "tally", "sales", "hr", "marketing", "seo", "content writing"))
         has_tech     = any(re.search(rf"\b{kw}\b", names) for kw in ("machine learning", "backend", "react", "python", "aws"))
         if has_non_tech and has_tech:
-            return True
+            suspicion_score += 1
 
-    claimed = float(profile.get("years_of_experience", 0) or 0)
-    if 0 < claimed < 10 and any(int(j.get("duration_months", 0) or 0) > 240 for j in career):
-        return True
-
+    # 4. Technology Time-Travel & 5. Skill Exceeds Career
+    max_excess_penalty = 0
+    total_career_months = actual_yoe * 12
+    
     for s in skills:
         name = s.get("name", "").lower()
         dur  = int(s.get("duration_months", 0) or 0)
-        if dur > 36 and ("langchain" in name or "openai" in name or "chatgpt" in name or "llama" in name):
-            return True
-        if dur > 60 and ("qdrant" in name or "weaviate" in name or "pinecone" in name):
-            return True
+        
+        # Tech Time-Travel
+        if "langchain" in name or "openai" in name or "chatgpt" in name or "llama" in name:
+            if dur > 120: suspicion_score += 4
+            elif dur > 48: suspicion_score += 2
+        elif "qdrant" in name or "weaviate" in name or "pinecone" in name:
+            if dur > 120: suspicion_score += 4
+            elif dur > 84: suspicion_score += 2
+            
+        # Skill Exceeds Career
+        if total_career_months > 0:
+            excess = dur - total_career_months
+            if excess > 60:
+                max_excess_penalty = max(max_excess_penalty, 2)
+            elif excess > 24:
+                max_excess_penalty = max(max_excess_penalty, 1)
 
-    return False
+    suspicion_score += max_excess_penalty
+
+    return suspicion_score >= 4
 
 def fast_score(candidate: dict) -> float:
     profile = candidate.get("profile", {}) or {}
