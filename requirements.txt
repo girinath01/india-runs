@@ -1,3 +1,3 @@
-# No third-party runtime dependencies.
-# rank.py uses only the Python standard library for offline CPU reproduction.
+# No third-party runtime dependencies for rank.py.
 # Supported on Python 3.8+
+gradio>=3.0.0
