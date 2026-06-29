@@ -1,3 +1,14 @@
+---
+title: Redrob Candidate Ranker
+emoji: 🚀
+colorFrom: blue
+colorTo: green
+sdk: gradio
+sdk_version: "4.0.0"
+app_file: app.py
+pinned: false
+---
+
 # Redrob AI Candidate Ranker
 
 A hyper-optimized, pure-Python candidate ranking engine built for the Redrob AI Senior AI Engineer (Founding Team) challenge. 
