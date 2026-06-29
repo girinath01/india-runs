@@ -1321,7 +1321,7 @@ def analyze_production(c: Candidate) -> ProductionFeatures:
             desc_snip = (job.get("description", "") or "")[:100]
             evidence.append(Evidence("production", desc_snip, priority=8))
 
-    research_only = research_total > 2.0 and ship_total <= 1.0
+    research_only = research_total > 1.0 and ship_total <= 0.5
 
     # Map to 0–18 with better scaling
     raw = min(18.0, ship_total * 1.2)
@@ -1816,14 +1816,17 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
     elif fv.career.service_years > 0 and fv.career.product_years + fv.career.startup_years == 0:
         penalty += 6
 
-    # P_DOMAIN: Wrong domain (CV/Speech/Robotics) — explicit JD disqualifier
+    # P_DOMAIN: Wrong domain (CV/Speech/Robotics)
     if fv.skills.disq_fraction > 0.40:
+        penalty += 100
+    elif fv.skills.disq_fraction > 0.25 and fv.jd_intent.score < 10:
         penalty += 100
     elif fv.skills.disq_fraction > 0.25:
         penalty += 50
-    
-    # CV titles are hard disqualified unless they built retrieval systems
-    if "computer vision" in title or "cv engineer" in title:
+        
+    # Broadened CV Title check
+    cv_match = re.search(r'\b(computer vision|cv|vision|perception|image processing|robotics|speech)\b', title)
+    if cv_match:
         if fv.jd_intent.score < 10:
             penalty += 100
 
@@ -1831,9 +1834,14 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
     if fv.production.research_only:
         penalty += 100
 
-    # P_PROD: No production experience
-    if fv.production.score == 0 and fv.production.ship_count == 0:
+    # P_PROD: No shipped production experience (ignoring generic title boost)
+    if fv.production.ship_count == 0:
         penalty += 100
+        
+    # P_NO_DOMAIN_PROD: Lacking production retrieval/ranking systems
+    if not fv.jd_intent.search_hit and not fv.jd_intent.recommendation_hit:
+        if fv.production.score < 5:
+            penalty += 100
 
     # P5: Prompt-engineer-only (10 pts) — JD: "If your experience consists of LangChain + OpenAI"
     skill_names = " ".join(s.get("name", "").lower() for s in c.skills)
@@ -2127,6 +2135,12 @@ def generate_reasoning(
             parts = ["Hard Rejection: Almost entirely consulting background."]
         elif any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
             parts = [f"Hard Rejection: Non-technical role ({title})."]
+        elif fv.production.ship_count == 0:
+            parts = ["Hard Rejection: No evidence of shipping ML systems to production."]
+        elif not fv.jd_intent.search_hit and not fv.jd_intent.recommendation_hit and fv.production.score < 5:
+            parts = ["Hard Rejection: Lacks required production retrieval/ranking domain experience."]
+        elif re.search(r'\b(computer vision|cv|vision|perception|image processing|robotics|speech)\b', title) or fv.skills.disq_fraction > 0.25:
+            parts = ["Hard Rejection: CV/Speech specialist without core retrieval experience."]
         else:
             parts = ["Hard Rejection: Disqualified due to massive penalties."]
 
