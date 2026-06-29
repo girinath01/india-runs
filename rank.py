@@ -172,13 +172,14 @@ class CompanyFeatures:
     startup: bool
     elite_company: bool
     consult_fraction: float
+    founder_mindset: bool
     evidence: list = field(default_factory=list)
 
 
 @dataclass
 class SkillFeatures:
-    """Output of SkillAnalyzer. Supporting evidence only, 0–5."""
-    score: int                       # 0–5
+    """Output of SkillAnalyzer. Supporting evidence only, 0-3. JD: skills confirm experience, don't substitute."""
+    score: int                       # 0-3 (reduced to prevent keyword overweight)
     tier1_count: int
     tier2_count: int
     disq_fraction: float
@@ -254,13 +255,43 @@ class TrajectoryFeatures:
 
 
 @dataclass
+class DomainTenure:
+    """Output of DomainTenureAnalyzer. 0-10.
+    Measures YEARS spent specifically in retrieval/search/recommendation.
+    JD requires: 3+ years in this domain. Directly scored against that.
+    """
+    score: int           # 0-10
+    domain_months: int   # raw months in retrieval/search/recommendation
+    domain_years: float  # domain_months / 12.0
+
+
+@dataclass
 class HiringReadiness:
-    """Output of HiringReadinessAnalyzer. -3 to +8."""
-    score: int                       # -3 to +8
+    """Output of HiringReadinessAnalyzer v6.1. -3 to +8. Uses all 21 Redrob signals."""
+    score: int                       # -3 to +8  (final clamped total)
+    # Group 1: Availability
     notice_bonus: int                # -1 to +2
-    activity_score: int              # 0–3
-    recruiter_response: int          # 0–2
+    otw_pts: int                     # 0 to +1
+    work_mode_pts: int               # -1 to 0
     relocation: int                  # -1 to +1
+    # Group 2: Engagement
+    activity_score: int              # -1 to +2
+    recruiter_response: int          # -1 to +1
+    response_time_pts: int           # 0 to +1
+    applications_pts: int            # 0 to +1
+    # Group 3: Trust & Market Demand
+    interview_pts: int               # -1 to +1
+    offer_pts: int                   # -1 to +1
+    saved_pts: int                   # 0 to +1
+    views_pts: int                   # 0 to +1
+    completeness_pts: int            # -1 to +1
+    trust_pts: int                   # -1 to +1
+    # Group 4: Skill Validation
+    assessment_pts: int              # 0 to +2
+    github_pts: int                  # 0 to +1
+    endorsement_pts: int             # 0 to +1
+    search_pts: int                  # 0 to +1
+    # Legacy fields (used in generate_reasoning)
     open_to_work: bool
 
 
@@ -276,8 +307,9 @@ class FeatureVector:
     production: ProductionFeatures
     jd_intent:  JDIntentFeatures
     evaluation: EvalFeatures
-    trajectory: TrajectoryFeatures
-    hiring:     HiringReadiness
+    trajectory:    TrajectoryFeatures
+    hiring:        HiringReadiness
+    domain_tenure: DomainTenure
     all_evidence: list = field(default_factory=list)  # merged evidence for reasoning
 
 
@@ -354,9 +386,11 @@ PRIMARY_CORE_RE    = re.compile(r'\b(information retrieval|learning to rank|ltr|
 SECONDARY_CORE_RE  = re.compile(r'\b(ranking system|recommendation system|candidate ranking|personalization|relevance|matching engine|elasticsearch|opensearch)\b')
 EXPLICIT_VECTOR_RE = re.compile(r'\b(faiss|pinecone|qdrant|weaviate|milvus|pgvector)\b')
 VECTOR_TEXT_RE     = re.compile(r'\b(vector search|vector database|chroma|ann|hnsw)\b')
-HR_TEXT_RE         = re.compile(r'\b(hr tech|recruiting tech|talent acquisition platform|marketplace product|job board)\b')
+# HR_TEXT_RE superseded by MARKETPLACE_RE in v6.0 — kept for schema reference only
+# HR_TEXT_RE       = re.compile(r'\b(hr tech|recruiting tech|talent acquisition platform|marketplace product|job board)\b')
 PROD_TEXT_RE       = re.compile(r'\b(scale|shipped|deployed|productionized|enterprise|latency|qps|inference optimization|tensorrt|vllm|distributed systems|ray|spark)\b')
-INFRA_TEXT_RE      = re.compile(r'\b(search infra|retrieval pipeline|relevance|indexing|ranking optimization)\b')
+# INFRA_TEXT_RE superseded by SEARCH_RE in v6.0 — kept for schema reference only
+# INFRA_TEXT_RE      = re.compile(r'\b(search infra|retrieval pipeline|relevance|indexing|ranking optimization)\b')
 EVAL_TEXT_RE       = re.compile(r'\b(ndcg|mrr|mean average precision|a/b test|ab testing|offline evaluation|online evaluation)\b')
 RESEARCH_HEAVY_RE  = re.compile(r'\b(paper|publication|thesis|arxiv|academic)\b')
 
@@ -407,10 +441,11 @@ OWNERSHIP_HIGH_RE = re.compile(
     r'founded|established|spearheaded|initiated|invented|pioneered|'
     r'built and deployed|built and launched)\b'
 )
-OWNERSHIP_LOW_RE = re.compile(
-    r'\b(worked on|assisted|supported|helped|participated|contributed to|'
-    r'was part of|involved in|collaborated on)\b'
-)
+# OWNERSHIP_LOW_RE superseded by SUPPORT_VERBS_RE in v6.0 — kept for backward compat
+# OWNERSHIP_LOW_RE = re.compile(
+#     r'\b(worked on|assisted|supported|helped|participated|contributed to|'
+#     r'was part of|involved in|collaborated on)\b'
+# )
 
 # ImpactAnalyzer — measurable outcomes (Step 9)
 IMPACT_METRICS_RE = re.compile(
@@ -477,6 +512,7 @@ NON_TECH_TITLES = frozenset({
     "civil engineer", "mechanical engineer", "electrical engineer",
     "finance manager", "account manager", "talent acquisition", "recruiter",
     "data entry", "tester", "manual tester", "business development",
+    "scrum master", "product manager", "sales", "marketing",
 })
 
 PREFERRED_LOCATIONS = frozenset({
@@ -508,6 +544,24 @@ RESEARCH_SIGNALS = frozenset({
     "pure research", "benchmark", "theoretical",
 })
 RESEARCH_SIGNALS_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, RESEARCH_SIGNALS)) + r')\b')
+
+# Production-scale signals — differentiate 100 users from 10M users
+SCALE_RE = re.compile(
+    r'\\b(?:'
+    r'\\d+(?:\\.\\d+)?\\s*(?:million|billion|m\\+?|b\\+?)\\s*(?:users?|requests?|queries?|candidates?|records?|dau|mau)\\b'
+    r'|(?:millions?|billions?)\\s+of\\s+(?:users?|requests?|queries?|records?|profiles?)'
+    r'|10[kmb]\\+?\\s*(?:users?|requests?|queries?)'
+    r'|at\\s+(?:massive|web|production)\\s+scale'
+    r'|high[- ](?:traffic|throughput|volume|qps)'
+    r'|(?:1|2|5|10|50|100|500)[kmb]\\s+(?:rps|qps|tps)'
+    r')',
+    re.IGNORECASE
+)
+
+FOUNDING_MINDSET_RE = re.compile(
+    r'\b(0\s*to\s*1|0->1|greenfield|from scratch|built v1|first engineer|founding|early stage|startup)\b',
+    re.IGNORECASE
+)
 
 PASS2_POOL_SIZE = 12000
 FAST_WORDS_RE = re.compile(
@@ -864,8 +918,11 @@ def analyze_career(c: Candidate) -> CareerFeatures:
         elif any(kw in td for kw in _SPEC_DATA_KW):
             spec_counts["DATA"] += dur
 
-    specialization = max(spec_counts, key=spec_counts.get) if any(spec_counts.values()) else "GENERALIST"
-    if spec_counts[specialization] == 0:
+    if any(spec_counts.values()):
+        specialization = max(spec_counts, key=spec_counts.get)
+        if spec_counts[specialization] == 0:
+            specialization = "GENERALIST"
+    else:
         specialization = "GENERALIST"
 
     spec_bonus = {"RETRIEVAL": 3, "ML": 2, "BACKEND": 1, "DATA": 1, "GENERALIST": 0}
@@ -935,6 +992,7 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
     is_startup = False
     total_months = consulting_months = 0
     best_type = "OTHER"
+    founder_mindset = False
 
     for job in c.career:
         comp     = (job.get("company",      "") or "").lower()
@@ -945,6 +1003,8 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
         total_months += dur
 
         is_consulting = bool(CONSULTING_RE.search(industry) or CONSULTING_RE.search(comp))
+        if FOUNDING_MINDSET_RE.search(desc) or FOUNDING_MINDSET_RE.search(comp):
+            founder_mindset = True
         if is_consulting:
             consulting_months += dur
 
@@ -995,7 +1055,7 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
     # Consulting penalty
     if consult_frac >= 0.95:
         score = max(0, score - 3)
-    elif consult_frac >= 0.80:
+    elif consult_frac > 0.90:
         score = max(0, score - 2)
 
     return CompanyFeatures(
@@ -1006,6 +1066,7 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
         startup=is_startup,
         elite_company=elite_hit,
         consult_fraction=consult_frac,
+        founder_mindset=founder_mindset,
         evidence=evidence,
     )
 
@@ -1058,7 +1119,7 @@ def analyze_skills(c: Candidate) -> SkillFeatures:
     elif disq_frac > 0.40:
         score = max(0, score - 2)
 
-    score = min(5, max(0, score))
+    score = min(1, max(0, score))  # capped at 1: skills mean almost nothing without experience: skills confirm, don't substitute experience
 
     if tier1_names:
         evidence.append(Evidence("skill", f"Core skills: {', '.join(tier1_names[:4])}", priority=5))
@@ -1224,7 +1285,7 @@ def analyze_production(c: Candidate) -> ProductionFeatures:
         except ValueError:
             end_date = TODAY
         years_ago = max(0.0, (TODAY - end_date).days / 365.25)
-        decay     = max(0.2, math.exp(-0.20 * years_ago))
+        decay     = max(0.05, math.exp(-0.35 * years_ago))
 
         job_text = ((job.get("title", "") or "") + " " + (job.get("description", "") or "")).lower()
         j_size   = (job.get("company_size", "") or "")
@@ -1238,21 +1299,32 @@ def analyze_production(c: Candidate) -> ProductionFeatures:
         pr_hits      = len(set(PROD_TEXT_RE.findall(job_text)))
         p_hits       = len(set(PRIMARY_CORE_RE.findall(job_text)))
         ex_hits      = len(set(EXPLICIT_VECTOR_RE.findall(job_text)))
+        scale_hits   = len(set(SCALE_RE.findall(job_text))) if has_domain else 0
+        built_vector = bool(re.search(r'\b(built|implemented|shipped|deployed|created|developed)\b.{0,80}?\b(faiss|pinecone|qdrant|weaviate|milvus|pgvector|chroma)\b', job_text))
+        if built_vector:
+            ship_total += 4.0 * decay * size_mult  # Built FAISS > FAISS skill
 
-        # Co-occurrence: shipping IR/Vector systems → massive boost
-        co_occur_mult = 2.0 if (pr_hits > 0 and (p_hits > 0 or ex_hits > 0)) else 1.0
+        # Co-occurrence: shipping IR/Vector systems at scale -> massive boost
+        if pr_hits > 0 and (p_hits > 0 or ex_hits > 0):
+            ship_total += (ship_hits + pr_hits) * decay * size_mult * 2.0
+        elif has_domain and ship_hits > 0:
+            ship_total += ship_hits * decay * size_mult * 1.5
+        elif has_domain:
+            ship_total += pr_hits * decay * size_mult * 0.5
+        # Scale bonus: mentions of scale (millions of users, high QPS) are premium signal
+        if scale_hits > 0 and has_domain:
+            ship_total += scale_hits * decay * size_mult * 1.2
 
-        ship_total += (ship_hits + pr_hits) * decay * size_mult * co_occur_mult
         research_total += research_hits * decay
 
-        if ship_hits > 0 and has_domain:
+        if (ship_hits > 0 or pr_hits > 0) and has_domain:
             desc_snip = (job.get("description", "") or "")[:100]
             evidence.append(Evidence("production", desc_snip, priority=8))
 
-    research_only = research_total > 0 and ship_total <= 1.0
+    research_only = research_total > 2.0 and ship_total <= 1.0
 
-    # Map to 0–18
-    raw = min(18.0, ship_total * 0.6)
+    # Map to 0–18 with better scaling
+    raw = min(18.0, ship_total * 1.2)
     if research_only:
         raw = max(0, raw - 5)
 
@@ -1262,7 +1334,7 @@ def analyze_production(c: Candidate) -> ProductionFeatures:
     for t, sc in STRONG_TITLE_SCORES.items():
         if t in title:
             title_prod = max(title_prod, int(sc * 4))
-    raw = min(18, raw + title_prod * 0.3)
+    raw = min(18, raw + title_prod * 0.5)
 
     score = max(0, min(18, int(raw)))
 
@@ -1292,11 +1364,27 @@ def analyze_jd_intent(c: Candidate) -> JDIntentFeatures:
     combined = full_text + " " + skill_names
     evidence = []
 
-    recommendation_hit = bool(RECOMMENDATION_RE.search(combined))
-    search_hit         = bool(SEARCH_RE.search(combined))
-    marketplace_hit    = bool(MARKETPLACE_RE.search(combined))
+    # Recency-weighted domain hits: recent experience counts more than old
+    # Each job contributes with decay weight: 1.0 -> 0.3 over 7 years
+    _rec_score = _srch_score = _mkt_score = 0.0
+    for _job in c.career[:7]:
+        _end_str = str(_job.get("end_date", str(TODAY))).split("T")[0]
+        try:    _end_dt = datetime.strptime(_end_str, "%Y-%m-%d").date()
+        except: _end_dt = TODAY
+        _yrs_ago = max(0.0, (TODAY - _end_dt).days / 365.25)
+        _w = max(0.0, 1.0 - 0.25 * _yrs_ago)  # 1.0 at current, 0.3 at 7+ yrs
+        _jt = ((_job.get("title", "") or "") + " " + (_job.get("description", "") or "")).lower()
+        if RECOMMENDATION_RE.search(_jt): _rec_score  += _w
+        if SEARCH_RE.search(_jt):         _srch_score += _w
+        if MARKETPLACE_RE.search(_jt):    _mkt_score  += _w
+    recommendation_hit = bool(RECOMMENDATION_RE.search(combined)) or _rec_score  >= 0.5
+    search_hit         = bool(SEARCH_RE.search(combined))         or _srch_score >= 0.5
+    marketplace_hit    = bool(MARKETPLACE_RE.search(combined))    or _mkt_score  >= 0.5
     evaluation_hit     = bool(EVAL_TEXT_RE.search(combined))
     vector_hit         = bool(EXPLICIT_VECTOR_RE.search(combined) or VECTOR_TEXT_RE.search(combined))
+    # Store recency scores for scoring (higher = more recent domain experience)
+    _rec_weight  = min(1.0, _rec_score  / 2.0)  # normalize: 2 recent jobs = max
+    _srch_weight = min(1.0, _srch_score / 2.0)
 
     # Hybrid search: traditional IR + dense vectors in same profile
     hybrid_bonus = 0
@@ -1319,13 +1407,15 @@ def analyze_jd_intent(c: Candidate) -> JDIntentFeatures:
     # Score: sum of bucket hits, capped at 20
     score = 0
     if recommendation_hit:
-        score += 7
+        # Recency bonus: add up to 2 extra points for CURRENT recommendation work
+        score += 7 + int(_rec_weight * 2)  # Balanced with Search and Marketplace
         evidence.append(Evidence("recommendation", "Profile demonstrates recommendation/personalization experience", priority=9))
     if search_hit:
-        score += 6
+        # Recency bonus: add up to 2 extra points for CURRENT search/retrieval work
+        score += 7 + int(_srch_weight * 2)  # Balanced with Recommendation
         evidence.append(Evidence("retrieval", "Profile demonstrates search/retrieval system experience", priority=9))
     if marketplace_hit:
-        score += 5
+        score += 7
         evidence.append(Evidence("marketplace", "Profile shows marketplace/matching platform experience", priority=8))
     if evaluation_hit:
         score += 3
@@ -1340,7 +1430,7 @@ def analyze_jd_intent(c: Candidate) -> JDIntentFeatures:
     if generic_ml and not search_hit and not recommendation_hit and not vector_hit:
         score = max(0, score - 3)
 
-    score = min(20, max(0, score))
+    score = min(24, max(0, score))  # cap raised to 24 to allow recency bonuses
 
     return JDIntentFeatures(
         score=score,
@@ -1386,11 +1476,11 @@ def analyze_evaluation(c: Candidate) -> EvalFeatures:
 
     has_eval = len(eval_methods) > 0
 
-    # Score: 0–8
-    if   len(eval_methods) >= 4: score = 8
-    elif len(eval_methods) >= 3: score = 6
-    elif len(eval_methods) >= 2: score = 4
-    elif len(eval_methods) >= 1: score = 2
+        # Score: 0-15 (Search Quality metrics are nearly mandatory for top ranks)
+    if   len(eval_methods) >= 4: score = 15
+    elif len(eval_methods) >= 3: score = 12
+    elif len(eval_methods) >= 2: score = 8
+    elif len(eval_methods) >= 1: score = 4
     else:                        score = 0
 
     if eval_methods:
@@ -1419,10 +1509,12 @@ def analyze_trajectory(c: Candidate) -> TrajectoryFeatures:
     trajectory = []
     for job in reversed(c.career):
         title = (job.get("title", "") or "").lower()
-        lvl   = 3
+        lvl = 0
         for k, v in levels.items():
             if k in title:
-                lvl = max(lvl, v) if k in ("lead", "staff", "principal") else v
+                lvl = max(lvl, v)   # always take the highest level found
+        if lvl == 0:
+            lvl = 3
         dur = max(1, int(job.get("duration_months", 1) or 1))
         trajectory.append((lvl, dur))
 
@@ -1450,75 +1542,213 @@ def analyze_trajectory(c: Candidate) -> TrajectoryFeatures:
 
 def analyze_hiring_readiness(c: Candidate) -> HiringReadiness:
     """
-    HiringReadinessAnalyzer v6.0 — availability + engagement, -3 to +8.
+    HiringReadinessAnalyzer v6.1 -- uses all 21 Redrob signals. Range: -3 to +8.
 
-    Notice period:        -1 to +2   (can NEVER dominate technical merit)
-    Activity:              0 to +3   (recent login)
-    Recruiter response:    0 to +2
-    Relocation:           -1 to +1
+    Group 1: Availability     (-2 to +4)  -- notice, open_to_work, work_mode, relocation
+    Group 2: Engagement       (-2 to +5)  -- activity, rr, response_time, applications
+    Group 3: Trust & Demand   (-3 to +5)  -- interview, offer, saved, views, completeness, verification
+    Group 4: Skill Validation ( 0 to +5)  -- assessments, github, endorsements, search_appearance
+    Total clamped to -3..+8.
     """
     signals = c.signals
 
-    # ── Notice period (-1 to +2) — CAPPED per user spec ───────────────
+    # ── Group 1: Availability (-2 to +4) ────────────────────────────
+    # 1. Notice period
     notice = int(signals.get("notice_period_days", 60) or 60)
     if   notice <= 15: notice_bonus = 2
     elif notice <= 30: notice_bonus = 1
     elif notice <= 60: notice_bonus = 0
     else:              notice_bonus = -1
 
-    # ── Activity (0–3) ────────────────────────────────────────────────
-    activity_score = 1   # default
+    # 2. Open-to-work flag
+    otw = bool(signals.get("open_to_work_flag", False))
+    otw_pts = 1 if otw else 0
+
+    # 3. Preferred work mode (founding team role = onsite/hybrid expected)
+    work_mode = (signals.get("preferred_work_mode", "") or "").lower()
+    if work_mode in ("onsite", "hybrid", "flexible"): work_mode_pts = 0
+    elif work_mode == "remote":                        work_mode_pts = -1
+    else:                                              work_mode_pts = 0
+
+    # 4. Relocation / location fit
+    location    = c.location.lower()
+    country     = c.country.lower()
+    willing     = bool(signals.get("willing_to_relocate", False))
+    is_india    = country in ("india", "in") or "india" in location
+    is_preferred = any(city in location for city in PREFERRED_LOCATIONS)
+    if is_preferred:        relocation = 1
+    elif is_india:          relocation = 0
+    elif willing:           relocation = -1
+    else:                   relocation = -1
+
+    availability = notice_bonus + otw_pts + work_mode_pts + relocation  # -3 to +4
+
+    # ── Group 2: Engagement (-2 to +5) ──────────────────────────────
+    # 5. Last active date
+    activity_score = 0
     last_dt = parse_date(signals.get("last_active_date", ""))
     if last_dt:
         days = (TODAY - last_dt).days
-        if   days <=  3: activity_score = 3
-        elif days <=  7: activity_score = 2
-        elif days <= 15: activity_score = 1
-        elif days <= 30: activity_score = 1
-        else:            activity_score = 0
+        if   days <=  3: activity_score = 2
+        elif days <=  7: activity_score = 1
+        elif days <= 30: activity_score = 0
+        else:            activity_score = -1   # inactive > 30 days is a flag
 
-    # ── Recruiter response (0–2) ──────────────────────────────────────
+    # 6. Recruiter response rate
     rr = float(signals.get("recruiter_response_rate", 0.0) or 0.0)
-    if   rr >= 0.7: recruiter_response = 2
-    elif rr >= 0.3: recruiter_response = 1
-    else:           recruiter_response = 0
+    if   rr >= 0.7: recruiter_response = 1
+    elif rr >= 0.3: recruiter_response = 0
+    else:           recruiter_response = -1    # <30% response is a real flag
 
-    # ── Relocation (-1 to +1) ─────────────────────────────────────────
-    location = c.location.lower()
-    country  = c.country.lower()
-    willing  = bool(signals.get("willing_to_relocate", False))
-    is_india = country in ("india", "in") or "india" in location
-    is_preferred = any(city in location for city in PREFERRED_LOCATIONS)
+    # 7. Average response time to recruiter messages
+    avg_rt = float(signals.get("avg_response_time_hours", 48) or 48)
+    response_time_pts = 1 if avg_rt <= 4 else 0   # responds same-day
 
-    if is_preferred:
-        relocation = 1
-    elif is_india and willing:
-        relocation = 0
-    elif is_india:
-        relocation = 0
-    elif willing:
-        relocation = -1
-    else:
-        relocation = -1
+    # 8. Applications submitted (actively job-seeking)
+    apps = int(signals.get("applications_submitted_30d", 0) or 0)
+    applications_pts = 1 if apps >= 3 else 0
 
-    # ── Open to work flag ─────────────────────────────────────────────
-    otw = bool(signals.get("open_to_work_flag", False))
+    engagement = activity_score + recruiter_response + response_time_pts + applications_pts  # -2 to +5
 
-    # Total: -3 to +8
-    total = notice_bonus + activity_score + recruiter_response + relocation
-    if otw:
-        total += 1   # small bonus, never dominant
+    # ── Group 3: Trust & Market Demand (-3 to +5) ────────────────────
+    # 9. Interview completion (ghost risk)
+    icr_raw = signals.get("interview_completion_rate", None)
+    icr = float(icr_raw) if icr_raw is not None else 1.0
+    if   icr >= 0.8: interview_pts = 1
+    elif icr >= 0.5: interview_pts = 0
+    else:            interview_pts = -1   # high ghost risk
 
+    # 10. Offer acceptance rate (seriousness)
+    oar_raw = signals.get("offer_acceptance_rate", None)
+    oar = float(oar_raw) if oar_raw is not None else -1.0
+    if   oar >= 0.5: offer_pts = 1
+    elif oar == -1:  offer_pts = 0    # no prior offers -- neutral
+    elif oar >= 0.2: offer_pts = 0
+    else:            offer_pts = -1   # accepts then backs out
+
+    # 11. Saved by recruiters in last 30d (market demand)
+    saved = int(signals.get("saved_by_recruiters_30d", 0) or 0)
+    saved_pts = 1 if saved >= 5 else 0
+
+    # 12. Profile views in last 30d (recruiter interest)
+    views = int(signals.get("profile_views_received_30d", 0) or 0)
+    views_pts = 1 if views >= 10 else 0
+
+    # 13. Profile completeness (how seriously are they job-seeking?)
+    completeness = int(signals.get("profile_completeness_score", 50) or 50)
+    if   completeness >= 80: completeness_pts = 1
+    elif completeness >= 40: completeness_pts = 0
+    else:                    completeness_pts = -1
+
+    # 14. Verification trust (email + phone + linkedin)
+    v_email = bool(signals.get("verified_email",   False))
+    v_phone = bool(signals.get("verified_phone",   False))
+    v_li    = bool(signals.get("linkedin_connected", False))
+    verified_count = sum([v_email, v_phone, v_li])
+    if   verified_count >= 2: trust_pts = 1
+    elif verified_count == 1: trust_pts = 0
+    else:                     trust_pts = -1   # no verification at all
+
+    trust_demand = interview_pts + offer_pts + saved_pts + views_pts + completeness_pts + trust_pts  # -3 to +5
+
+    # ── Group 4: Skill Validation (0 to +5) ─────────────────────────
+    # 15. Skill assessment scores (validated, not self-reported)
+    assessments = signals.get("skill_assessment_scores", {}) or {}
+    assessment_pts = 0
+    if assessments:
+        relevant = [
+            float(v) for k, v in assessments.items()
+            if TIER1_REGEX.search(re.sub(r"[-_/]", " ", k.lower()))
+            or TIER2_REGEX.search(re.sub(r"[-_/]", " ", k.lower()))
+        ]
+        if relevant:
+            avg = sum(relevant) / len(relevant)
+            if   avg >= 80: assessment_pts = 2
+            elif avg >= 60: assessment_pts = 1
+
+    # 16. GitHub activity (positive use -- P9 penalty covers the negative side)
+    github = int(signals.get("github_activity_score", 0) or 0)
+    github_pts = 1 if github >= 50 else 0
+
+    # 17. Endorsements received (peer-validated skills)
+    endorsements = int(signals.get("endorsements_received", 0) or 0)
+    endorsement_pts = 1 if endorsements >= 20 else 0
+
+    # 18. Search appearance (how discoverable are they to recruiters?)
+    search_app = int(signals.get("search_appearance_30d", 0) or 0)
+    search_pts = 1 if search_app >= 20 else 0
+
+    validation = assessment_pts + github_pts + endorsement_pts + search_pts  # 0 to +5
+
+    # ── Total: clamp to -3..+8 ───────────────────────────────────────
+    total = availability + engagement + trust_demand + validation
     total = max(-3, min(8, total))
 
     return HiringReadiness(
         score=total,
         notice_bonus=notice_bonus,
+        otw_pts=otw_pts,
+        work_mode_pts=work_mode_pts,
+        relocation=relocation,
         activity_score=activity_score,
         recruiter_response=recruiter_response,
-        relocation=relocation,
+        response_time_pts=response_time_pts,
+        applications_pts=applications_pts,
+        interview_pts=interview_pts,
+        offer_pts=offer_pts,
+        saved_pts=saved_pts,
+        views_pts=views_pts,
+        completeness_pts=completeness_pts,
+        trust_pts=trust_pts,
+        assessment_pts=assessment_pts,
+        github_pts=github_pts,
+        endorsement_pts=endorsement_pts,
+        search_pts=search_pts,
         open_to_work=otw,
     )
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+def analyze_domain_tenure(c: Candidate) -> DomainTenure:
+    """
+    DomainTenureAnalyzer v6.2 -- 0-10 pts.
+
+    The JD explicitly requires "3+ years specifically in retrieval, search,
+    or recommendation systems." This analyzer counts months directly spent
+    in those domains (job title + description), regardless of total YoE.
+
+    Scoring:
+      domain_years >= 4  -> 10   (above JD requirement)
+      domain_years >= 3  ->  8   (meets JD minimum)
+      domain_years >= 2  ->  6
+      domain_years >= 1  ->  4
+      domain_years >= 0.5->  2
+      domain_years == 0  ->  0   (no domain history = significant gap)
+    """
+    domain_months = 0
+    for job in c.career:
+        t   = (job.get("title", "") or "").lower()
+        d   = (job.get("description", "") or "").lower()[:600]
+        td  = t + " " + d
+        dur = max(1, int(job.get("duration_months", 1) or 1))
+        if (SEARCH_RE.search(td)
+                or RECOMMENDATION_RE.search(td)
+                or any(kw in td for kw in _SPEC_RETRIEVAL_KW)):
+            domain_months += dur
+
+    domain_years = domain_months / 12.0
+
+    # MASSIVE EMPHASIS ON DOMAIN TENURE
+    if   domain_years >= 5:   score = 25
+    elif domain_years >= 4:   score = 20
+    elif domain_years >= 3:   score = 15
+    elif domain_years >= 2:   score = 10
+    elif domain_years >= 1:   score = 5
+    elif domain_years >= 0.5: score = 2
+    else:                     score = 0
+
+    return DomainTenure(score=score, domain_months=domain_months, domain_years=domain_years)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1536,8 +1766,9 @@ def extract_features(c: Candidate) -> FeatureVector:
     production = analyze_production(c)
     jd_intent  = analyze_jd_intent(c)
     evaluation = analyze_evaluation(c)
-    trajectory = analyze_trajectory(c)
-    hiring     = analyze_hiring_readiness(c)
+    trajectory    = analyze_trajectory(c)
+    hiring        = analyze_hiring_readiness(c)
+    domain_tenure = analyze_domain_tenure(c)
 
     # Merge all evidence for reasoning (sorted by priority, highest first)
     all_evidence = (
@@ -1552,7 +1783,8 @@ def extract_features(c: Candidate) -> FeatureVector:
         evidence=ev, ownership=ownership, impact=impact,
         production=production, jd_intent=jd_intent,
         evaluation=evaluation, trajectory=trajectory,
-        hiring=hiring, all_evidence=all_evidence,
+        hiring=hiring, domain_tenure=domain_tenure,
+        all_evidence=all_evidence,
     )
 
 
@@ -1572,21 +1804,36 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
 
     # P1: Non-tech title (20 pts) — marketing/HR/finance with AI keywords
     if any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
-        penalty += 20
+        penalty += 100
 
     # P2: Junior title (8 pts) — JD needs 5-9 yr seniority
     if any(p in title for p in ("junior", "jr.", "intern", "trainee")) and "senior" not in title:
         penalty += 8
 
     # P3: Services-only career (6 pts) — JD explicitly warns about consulting
-    if fv.career.service_years > 0 and fv.career.product_years + fv.career.startup_years == 0:
-        total_yrs = fv.career.service_years + fv.career.product_years + fv.career.startup_years
-        if total_yrs > 0 and fv.career.service_years / total_yrs > 0.80:
-            penalty += 6
+    if fv.company.consult_fraction > 0.90:
+        penalty += 100
+    elif fv.career.service_years > 0 and fv.career.product_years + fv.career.startup_years == 0:
+        penalty += 6
+
+    # P_DOMAIN: Wrong domain (CV/Speech/Robotics) — explicit JD disqualifier
+    if fv.skills.disq_fraction > 0.40:
+        penalty += 100
+    elif fv.skills.disq_fraction > 0.25:
+        penalty += 50
+    
+    # CV titles are hard disqualified unless they built retrieval systems
+    if "computer vision" in title or "cv engineer" in title:
+        if fv.jd_intent.score < 10:
+            penalty += 100
 
     # P4: Research-only (8 pts) — JD: "tried it twice, didn't work"
     if fv.production.research_only:
-        penalty += 8
+        penalty += 100
+
+    # P_PROD: No production experience
+    if fv.production.score == 0 and fv.production.ship_count == 0:
+        penalty += 100
 
     # P5: Prompt-engineer-only (10 pts) — JD: "If your experience consists of LangChain + OpenAI"
     skill_names = " ".join(s.get("name", "").lower() for s in c.skills)
@@ -1627,7 +1874,7 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
     # P10: Trajectory penalty (from trajectory analyzer)
     penalty += fv.trajectory.penalty
 
-    return min(50, penalty)
+    return penalty
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1646,17 +1893,18 @@ def compute_score(fv: FeatureVector, penalties: int) -> float:
     Synergy bonuses reward JD-valued combinations.
     """
 
-    # ── Technical components ──────────────────────────────────────────
+    # -- Technical components --
     technical = (
-        fv.career.score          # 0–25
-        + fv.jd_intent.score     # 0–20
-        + fv.production.score    # 0–18
-        + fv.ownership.score     # 0–12
-        + fv.impact.score        # 0–10
-        + fv.evaluation.score    # 0–8
-        + fv.company.score       # 0–6
-        + fv.trajectory.score    # 0–6
-        + fv.skills.score        # 0–5
+        fv.career.score           # 0-25
+        + fv.jd_intent.score      # 0-24 (was 20, +4 for recency bonuses)
+        + fv.production.score     # 0-18
+        + fv.ownership.score      # 0-12
+        + fv.impact.score         # 0-10
+        + fv.domain_tenure.score  # 0-25  HEAVILY WEIGHTED: months in retrieval/search/recommendation
+        + fv.evaluation.score     # 0-15
+        + fv.company.score        # 0-6
+        + fv.trajectory.score     # 0-6
+        + fv.skills.score         # 0-1  (drastically reduced; experience matters more; skills confirm, don't substitute)
     )
 
     # ── Step 3: Synergy bonuses ───────────────────────────────────────
@@ -1690,15 +1938,51 @@ def compute_score(fv: FeatureVector, penalties: int) -> float:
     if fv.company.elite_company and fv.company.search_exposure:
         synergy += 3
 
+    # === 3-WAY SYNERGY BONUSES (v6.2) ===
+    # Search + Production + Evaluation = rare combination JD specifically values
+    if (fv.jd_intent.search_hit and fv.production.score >= 10
+            and fv.evaluation.has_eval):
+        synergy += 6  # exceeds pairwise: the complete "ship + measure" profile
+
+    # Domain Tenure + Search + Production = proven long-term domain contributor
+    if (fv.domain_tenure.domain_years >= 2
+            and fv.jd_intent.search_hit and fv.production.score >= 8):
+        synergy += 5  # JD says "3+ yrs specifically in domain": long-term + shipping
+
+    # Domain Tenure + Recommendation + Ownership = ran the system, not just worked on it
+    if (fv.domain_tenure.domain_years >= 1.5
+            and fv.jd_intent.recommendation_hit
+            and fv.ownership.level in ("OWNER", "LEAD")):
+        synergy += 4
+
+        # Founder Mindset Bonus
+    if fv.company.founder_mindset:
+        synergy += 6  # Substantial reward for 0->1 builders
+        
+    # Extra boost for Eval + Production (make it huge)
+    if fv.production.score >= 10 and fv.evaluation.has_eval:
+        synergy += 4  # Total +8 synergy for this pair now!
+
     technical += synergy
 
     # ── Hiring Readiness ──────────────────────────────────────────────
     hiring = fv.hiring.score     # -3 to +8
 
-    # ── Final: technical × 0.90 + hiring × 0.10 − penalties ──────────
-    final = technical * 0.90 + hiring * 0.10 - penalties
+    # -- Final: capped technical + scaled hiring - penalties ----------
+    # Cap technical at 95 so hiring readiness is always visible even for
+    # the strongest candidates. Hiring: -3..+8 maps to -1.875..+5.0.
+    # Maximum possible: 95 + 5 - 0 = 100 (perfect technical + perfect hiring).
+    # -- Technical cap: 95.
+    # We added domain_tenure (+10) and JD recency (+4) to the technical scale.
+    # Raw technical scores can now reach ~150. Multiplier adjusted to 0.75 so only 
+    # the top 1% (score > 126) hit the technical ceiling of 95.0. 
+    # This ensures hiring readiness remains visible at the top end.
+    tech_contrib   = min(95.0, technical * 0.60)
+    hiring_contrib = (hiring / 8.0) * 5.0    # -1.875 to +5.0
 
-    return max(0.0, final)
+    final = tech_contrib + hiring_contrib - penalties
+
+    return max(0.0, min(100.0, final))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1724,6 +2008,7 @@ def generate_reasoning(
     fv: FeatureVector,
     c: Candidate,
     final_score: float,
+    penalties: int,
 ) -> tuple[str, set[str]]:
     """
     Evidence-driven reasoning v6.0.
@@ -1794,14 +2079,16 @@ def generate_reasoning(
         # Evidence sentences — each maps to a JD requirement
         for ev in unique_evidence:
             jd_link = _EVIDENCE_JD_MAP.get(ev.category, "relevant to the role")
-            # Clean up the sentence
+            # Clean up the sentence — truncate at word boundary
             sentence = ev.sentence.strip()
+            if len(sentence) > 180:
+                sentence = sentence[:180].rsplit(" ", 1)[0]
             if sentence and not sentence.endswith("."):
                 sentence += "."
             if len(sentence) > 10:
-                parts.append(f"{sentence[0].upper()}{sentence[1:]} This is {jd_link}.")
+                parts.append(f"{sentence[0].upper()}{sentence[1:]} — {jd_link}.")
             else:
-                parts.append(f"Evidence of {ev.category} experience, {jd_link}.")
+                parts.append(f"Evidence of {ev.category} experience — {jd_link}.")
     else:
         # No evidence extracted — use minimal factual statement
         parts.append(f"{title} with {yoe:g} years experience. No strong retrieval/search evidence found in profile.")
@@ -1829,6 +2116,19 @@ def generate_reasoning(
     if gaps and final_score < 80:
         gap_prefix = ["Gap: ", "However, ", "Concern: ", "Note: "][seed % 4]
         parts.append(gap_prefix + gaps[0] + ".")
+        
+    # Hard Rejection override
+    if final_score == 0.0 and penalties >= 100:
+        if "no production" in gaps[0] or fv.production.score == 0:
+            parts = ["Hard Rejection: No evidence of shipping to production."]
+        elif fv.production.research_only:
+            parts = ["Hard Rejection: Pure research background."]
+        elif fv.company.consult_fraction > 0.90:
+            parts = ["Hard Rejection: Almost entirely consulting background."]
+        elif any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
+            parts = [f"Hard Rejection: Non-technical role ({title})."]
+        else:
+            parts = ["Hard Rejection: Disqualified due to massive penalties."]
 
     # ── Quick-join indicator ──────────────────────────────────────────
     if notice_days <= 30 and fv.hiring.open_to_work and final_score >= 40:
@@ -1862,7 +2162,7 @@ def deep_score(raw: dict) -> tuple[float, str, set[str]]:
     penalties = compute_penalties(c, fv)
     final = compute_score(fv, penalties)
 
-    reasoning, category = generate_reasoning(fv, c, final)
+    reasoning, category = generate_reasoning(fv, c, final, penalties)
 
     return final, reasoning, category
 
