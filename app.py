@@ -21,8 +21,7 @@ demo = gr.Interface(
     inputs=gr.File(label="Upload candidates.jsonl (or .json)", file_types=[".jsonl", ".json", ".gz"]),
     outputs=gr.File(label="Download Ranked CSV"),
     title="Bug Hunters - Redrob Ranker v6.0",
-    description="Upload a sample of candidates to rank them. The system will process them through the Two-Pass Filter Engine and output a `submission.csv` file.",
-    allow_flagging="never"
+    description="Upload a sample of candidates to rank them. The system will process them through the Two-Pass Filter Engine and output a `submission.csv` file."
 )
 
 if __name__ == "__main__":
