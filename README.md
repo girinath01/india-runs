@@ -33,22 +33,26 @@ from `bug_hunters.csv`.
 The ranker uses a two-pass architecture designed for the 5-minute CPU limit:
 
 1. Pass 1 streams every candidate, computes a fast heuristic score, and keeps
-   only the top 5,000 profiles in memory.
+   only the top 12,000 profiles in memory.
 2. Pass 2 performs deeper scoring on that shortlist and writes the top 100.
 
 The final score emphasizes the reference-file hierarchy:
 
-- Search, retrieval, ranking, and evaluation experience
-- Vector database and ANN experience
+- Search, retrieval, ranking, and recommendation experience (treated equally)
+- Domain Tenure (Years spent explicitly in search/recommendation domains)
 - Production shipping evidence over pure research
-- Behavioral availability and responsiveness
+- Search Quality Metrics (NDCG, MAP, offline/online A/B testing)
+- "Founding Mindset" (0->1 builder experience)
 - Notice period, open-to-work, location, and relocation signals
 
-Hard penalties cover JD red flags such as non-technical roles, pure academic
-profiles without production evidence, LangChain/OpenAI-only profiles without
-retrieval fundamentals, consulting-heavy backgrounds, long notice periods, and
-title-chasing job histories.
-
+Hard rejections (-100 penalties) strictly filter out JD red flags:
+- Pure academic/research profiles without evidence of deployed systems
+- Computer Vision or Speech specialists lacking core retrieval intent
+- Candidates with generic titles who have zero production shipping evidence
+- Non-technical roles (Sales, HR, PMs, Scrum Masters)
+- Profiles with >90% of their career in consulting firms
+- LangChain/OpenAI-only profiles without retrieval fundamentals
+- Fabricated experience and extreme title-chasing job hoppers
 ## Files
 
 ```text
