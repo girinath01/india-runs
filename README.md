@@ -1,72 +1,68 @@
-# Redrob Hackathon - Bug Hunters Ranker
+# Redrob AI Candidate Ranker 
 
-Offline CPU-only candidate ranker for the Redrob AI Senior AI Engineer
-(Founding Team) challenge. The pipeline ranks the top 100 candidates from a
-large JSONL/JSONL.GZ candidate pool and writes a submission CSV with:
+A hyper-optimized, pure-Python candidate ranking engine built for the Redrob AI Senior AI Engineer (Founding Team) challenge. 
 
-```text
-candidate_id,rank,score,reasoning
-```
+This system parses massive JSONL candidate pools and identifies the top 100 "unicorn" engineers by extracting deep semantic evidence of production-scale retrieval, search, and recommendation systems.
 
-## Reproduce
+## 🚀 System Architecture
+
+The engine is constrained to a strict 5-minute CPU-only execution budget without external LLM APIs. To achieve this, it utilizes a **Two-Pass Filtering Pipeline**:
+
+1. **Pass 1: Fast Heuristic Streaming** 
+   Streams the massive `.jsonl` input in chunks, applying a lightweight regex-based heuristic to score candidates in milliseconds. It immediately discards the bottom ~88% of candidates, keeping only the top 12,000 in memory.
+2. **Pass 2: Deep Feature Extraction** 
+   The top 12,000 candidates undergo rigorous, full-profile extraction. The system compiles a highly detailed `FeatureVector` for each candidate, analyzing their entire career trajectory, skill overlap, and explicit project descriptions.
+
+## 🧠 Scoring Modules (The Feature Vector)
+
+The algorithm operates on the philosophy that **evidence of shipping > keyword tags**. The Technical Fit score is composed of the following distinct analyzers:
+
+* **Domain Tenure (Anchor)**: Calculates explicit months spent working in search/recommendation/retrieval roles. (Max 25 points).
+* **JD Intent Matching**: Detects problem-domain alignment. Search, Recommendation, and Marketplace systems are weighted equally (+7 pts). Heavily decays experience older than 5 years.
+* **Production & Scale**: Scans for evidence of deploying vector databases (FAISS, Pinecone) and scale indicators (latency, QPS, millions of users).
+* **Evaluation Methodology**: Rewards candidates who explicitly measure their ranking systems using NDCG, MAP, MRR, or rigorous offline/online A/B testing.
+* **Ownership & Impact**: Determines if the candidate was a lead/owner (0->1 builder) or merely a peripheral contributor.
+* **Skills**: Capped heavily at just 1 point. We reward *evidence* of using a tool in production over merely listing it as a tag.
+* **Company Trajectory**: Evaluates if they worked at elite search companies, product companies, or startups.
+
+### 🤝 Synergy Bonuses
+The engine detects incredibly rare, powerful combinations and awards massive multiplier bonuses:
+* **"Ship & Measure"**: Candidates with strong production deployment *and* rigorous evaluation metrics.
+* **"Founding Mindset"**: Explicit evidence of building "0->1", "greenfield", or "v1" systems from scratch.
+
+## ⛔ Strict Hard Rejection Rules
+
+The ranker applies uncompromising penalties (-100 points) to instantly drop mismatched candidates to the bottom of the list:
+
+* **Pure Academic Researchers**: Candidates with extensive academic research hits but zero evidence of shipping models to production users.
+* **No Production Evidence**: Generic ML engineers who have never explicitly deployed, scaled, or optimized a production system.
+* **CV/Speech Specialists**: Engineers whose profiles are dominated by Computer Vision, Robotics, or Speech processing, lacking core retrieval intent.
+* **Consulting-Only**: Candidates who have spent >90% of their career at IT services/consulting firms rather than product companies.
+* **Non-Technical Titles**: PMs, HR, Sales, Scrum Masters, or generic Data Entry profiles masked by AI buzzwords.
+
+## 📊 Hiring Readiness
+
+After the technical score is capped at 95.0, the final 5.0 points are reserved for Behavioral/Hiring signals:
+* **Notice Period**: Rewards immediate joiners (< 30 days) and penalizes 90+ day notice periods.
+* **Location Fit**: Rewards candidates currently in preferred Indian tech hubs or those explicitly marked `open_to_relocate: true`.
+
+## 💻 How to Reproduce
+
+`rank.py` uses only the Python standard library. It performs no network calls and requires no GPU.
 
 ```bash
+# Verify no external dependencies are needed
 pip install -r requirements.txt
+
+# Run the full pipeline
 python rank.py --candidates ./candidates.jsonl --out ./bug_hunters.csv
+
+# Validate the final output structure
 python validate_submission.py ./bug_hunters.csv
 ```
 
-`rank.py` uses only the Python standard library. It performs no network calls,
-uses no hosted LLM APIs, and does not require a GPU.
-
-Supported input formats:
-
-- `.jsonl`
-- `.jsonl.gz`
-- `.json` arrays for small local samples
-
-Use the registered team/participant id for the final filename if it differs
-from `bug_hunters.csv`.
-
-## Method
-
-The ranker uses a two-pass architecture designed for the 5-minute CPU limit:
-
-1. Pass 1 streams every candidate, computes a fast heuristic score, and keeps
-   only the top 12,000 profiles in memory.
-2. Pass 2 performs deeper scoring on that shortlist and writes the top 100.
-
-The final score emphasizes the reference-file hierarchy:
-
-- Search, retrieval, ranking, and recommendation experience (treated equally)
-- Domain Tenure (Years spent explicitly in search/recommendation domains)
-- Production shipping evidence over pure research
-- Search Quality Metrics (NDCG, MAP, offline/online A/B testing)
-- "Founding Mindset" (0->1 builder experience)
-- Notice period, open-to-work, location, and relocation signals
-
-Hard rejections (-100 penalties) strictly filter out JD red flags:
-- Pure academic/research profiles without evidence of deployed systems
-- Computer Vision or Speech specialists lacking core retrieval intent
-- Candidates with generic titles who have zero production shipping evidence
-- Non-technical roles (Sales, HR, PMs, Scrum Masters)
-- Profiles with >90% of their career in consulting firms
-- LangChain/OpenAI-only profiles without retrieval fundamentals
-- Fabricated experience and extreme title-chasing job hoppers
-## Files
-
-```text
-rank.py                   Main offline ranking pipeline
-validate_submission.py    CSV format validator for the official submission rules
-requirements.txt          No third-party runtime dependencies
-submission_metadata.yaml  Team and reproduction metadata
-```
-
-## Notes
-
-- Output is UTF-8 CSV.
-- The generated CSV always uses ranks 1-100 when at least 100 candidates are
-  available.
-- Scores are sorted monotonically non-increasing by rank.
-- Reasoning strings are generated from candidate profile facts and include
-  rank-consistent strengths and concerns.
+### Files Overview
+* `rank.py`: The main offline ranking pipeline.
+* `validate_submission.py`: CSV format validator checking official Redrob submission rules.
+* `requirements.txt`: Standard library runtime verification.
+* `submission_metadata.yaml`: Team and environment reproduction metadata.
