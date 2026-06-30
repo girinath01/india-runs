@@ -16,7 +16,7 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
 
     # P1: Non-tech title (20 pts) — marketing/HR/finance with AI keywords
     if any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
-        penalty += 100
+        penalty += 60
 
     # P2: Junior title (8 pts) — JD needs 5-9 yr seniority
     if any(p in title for p in ("junior", "jr.", "intern", "trainee")) and "senior" not in title:
@@ -24,15 +24,15 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
 
     # P3: Services-only career (6 pts) — JD explicitly warns about consulting
     if fv.company.consult_fraction > 0.90:
-        penalty += 100
+        penalty += 60
     elif fv.career.service_years > 0 and fv.career.product_years + fv.career.startup_years == 0:
         penalty += 6
 
     # P_DOMAIN: Wrong domain (CV/Speech/Robotics)
     if fv.skills.disq_fraction > 0.40:
-        penalty += 100
+        penalty += 60
     elif fv.skills.disq_fraction > 0.25 and fv.jd_intent.score < 10:
-        penalty += 100
+        penalty += 60
     elif fv.skills.disq_fraction > 0.25:
         penalty += 50
         
@@ -40,20 +40,20 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
     cv_match = re.search(r'\b(computer vision|cv|vision|perception|image processing|robotics|speech)\b', title)
     if cv_match:
         if fv.jd_intent.score < 10:
-            penalty += 100
+            penalty += 60
 
     # P4: Research-only (8 pts) — JD: "tried it twice, didn't work"
     if fv.production.research_only:
-        penalty += 100
+        penalty += 60
 
     # P_PROD: No shipped production experience (ignoring generic title boost)
     if fv.production.ship_count == 0:
-        penalty += 100
+        penalty += 60
         
     # P_NO_DOMAIN_PROD: Lacking production retrieval/ranking systems
     if not fv.jd_intent.search_hit and not fv.jd_intent.recommendation_hit:
         if fv.production.score < 5:
-            penalty += 100
+            penalty += 60
 
     # P5: Prompt-engineer-only (10 pts) — JD: "If your experience consists of LangChain + OpenAI"
     skill_names = " ".join(s.get("name", "").lower() for s in c.skills)
@@ -337,24 +337,24 @@ def generate_reasoning(
         gap_prefix = ["Gap: ", "However, ", "Concern: ", "Note: "][seed % 4]
         parts.append(gap_prefix + gaps[0] + ".")
         
-    # Hard Rejection override
-    if final_score == 0.0 and penalties >= 100:
-        if "no production" in gaps[0] or fv.production.score == 0:
-            parts = ["Hard Rejection: No evidence of shipping to production."]
+    # Hard Rejection override (now Major Penalty)
+    if penalties >= 60:
+        if gaps and ("no production" in gaps[0] or fv.production.score == 0):
+            parts = ["Major Penalty: No evidence of shipping to production."]
         elif fv.production.research_only:
-            parts = ["Hard Rejection: Pure research background."]
+            parts = ["Major Penalty: Pure research background."]
         elif fv.company.consult_fraction > 0.90:
-            parts = ["Hard Rejection: Almost entirely consulting background."]
+            parts = ["Major Penalty: Almost entirely consulting background."]
         elif any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
-            parts = [f"Hard Rejection: Non-technical role ({title})."]
+            parts = [f"Major Penalty: Non-technical role ({title})."]
         elif fv.production.ship_count == 0:
-            parts = ["Hard Rejection: No evidence of shipping ML systems to production."]
+            parts = ["Major Penalty: No evidence of shipping ML systems to production."]
         elif not fv.jd_intent.search_hit and not fv.jd_intent.recommendation_hit and fv.production.score < 5:
-            parts = ["Hard Rejection: Lacks required production retrieval/ranking domain experience."]
+            parts = ["Major Penalty: Lacks required production retrieval/ranking domain experience."]
         elif re.search(r'\b(computer vision|cv|vision|perception|image processing|robotics|speech)\b', title) or fv.skills.disq_fraction > 0.25:
-            parts = ["Hard Rejection: CV/Speech specialist without core retrieval experience."]
+            parts = ["Major Penalty: CV/Speech specialist without core retrieval experience."]
         else:
-            parts = ["Hard Rejection: Disqualified due to massive penalties."]
+            parts = ["Major Penalty: Disqualified due to massive penalties."]
 
     # ── Quick-join indicator ──────────────────────────────────────────
     if notice_days <= 30 and fv.hiring.open_to_work and final_score >= 40:
