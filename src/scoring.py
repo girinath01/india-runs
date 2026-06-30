@@ -316,6 +316,23 @@ def generate_reasoning(
 
     # ── Biggest gap ───────────────────────────────────────────────────
     gaps = []
+    
+    # Check for chronological inconsistencies
+    time_travel = False
+    for s in c.skills:
+        name = s.get("name", "").lower()
+        dur = int(s.get("duration_months", 0) or 0)
+        if dur > 48 and any(kw in name for kw in ("langchain", "openai", "chatgpt", "llama")): time_travel = True
+        if dur > 84 and any(kw in name for kw in ("qdrant", "weaviate", "pinecone")): time_travel = True
+        
+    total_career_months = fv.career.actual_yoe * 12
+    if time_travel:
+        gaps.append("profile claims impossible skill durations (exceeds existence of technology)")
+    elif total_career_months > 0:
+        max_skill_dur = max([int(s.get("duration_months", 0) or 0) for s in c.skills] + [0])
+        if max_skill_dur > total_career_months + 36:
+            gaps.append("minor date inconsistencies (skill durations significantly exceed career length)")
+
     if not fv.jd_intent.search_hit and not fv.jd_intent.recommendation_hit:
         gaps.append("no retrieval/search/recommendation evidence in profile")
     if not fv.evaluation.has_eval:
@@ -334,7 +351,7 @@ def generate_reasoning(
     if notice_days > 90:
         gaps.append(f"{notice_days}-day notice period")
 
-    if gaps and final_score < 80:
+    if gaps and (final_score < 85 or "impossible" in gaps[0] or "inconsistencies" in gaps[0]):
         gap_prefix = ["Gap: ", "However, ", "Concern: ", "Note: "][seed % 4]
         parts.append(gap_prefix + gaps[0] + ".")
         
