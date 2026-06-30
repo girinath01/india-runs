@@ -720,10 +720,9 @@ def analyze_hiring_readiness(c: Candidate) -> HiringReadiness:
     # ── Group 1: Availability (-2 to +4) ────────────────────────────
     # 1. Notice period
     notice = int(signals.get("notice_period_days", 60) or 60)
-    if   notice <= 15: notice_bonus = 2
-    elif notice <= 30: notice_bonus = 1
-    elif notice <= 60: notice_bonus = 0
-    else:              notice_bonus = -1
+    if   notice <= 30: notice_bonus = 2   # Sub-30 loved, can buy out 30
+    elif notice <= 60: notice_bonus = -1  # 30+ in scope but bar is higher
+    else:              notice_bonus = -2
 
     # 2. Open-to-work flag
     otw = bool(signals.get("open_to_work_flag", False))
@@ -740,11 +739,15 @@ def analyze_hiring_readiness(c: Candidate) -> HiringReadiness:
     country     = c.country.lower()
     willing     = bool(signals.get("willing_to_relocate", False))
     is_india    = country in ("india", "in") or "india" in location
-    is_preferred = any(city in location for city in PREFERRED_LOCATIONS)
-    if is_preferred:        relocation = 1
+    
+    is_preferred = any(city in location for city in ("pune", "noida", "greater noida"))
+    is_welcome   = any(city in location for city in ("hyderabad", "mumbai", "delhi", "gurgaon", "gurugram", "ncr", "new delhi", "faridabad"))
+    
+    if is_preferred:        relocation = 2
+    elif is_welcome:        relocation = 1
     elif is_india:          relocation = 0
     elif willing:           relocation = -1
-    else:                   relocation = -1
+    else:                   relocation = -2
 
     availability = notice_bonus + otw_pts + work_mode_pts + relocation  # -3 to +4
 
