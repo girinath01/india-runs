@@ -185,13 +185,15 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
             evidence.append(Evidence("company", f"Worked at {comp.title()} (product tech company)", priority=5))
             
         # Use NER to extract implicit companies mentioned in descriptions (e.g. B2B clients, partners)
-        orgs = extract_companies(desc)
-        for org in orgs:
-            if any(ec in org for ec in ELITE_SEARCH_COMPANIES) and not elite_hit:
-                elite_hit = True
-                evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (elite search company)", priority=6))
-            if any(pc in org for pc in PRODUCT_TECH_COMPANIES):
-                evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (product tech company)", priority=4))
+        # Pre-filter: only run NER if a target company might be in the description
+        if any(ec in desc for ec in ELITE_SEARCH_COMPANIES) or any(pc in desc for pc in PRODUCT_TECH_COMPANIES):
+            orgs = extract_companies(desc)
+            for org in orgs:
+                if any(ec in org for ec in ELITE_SEARCH_COMPANIES) and not elite_hit:
+                    elite_hit = True
+                    evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (elite search company)", priority=6))
+                if any(pc in org for pc in PRODUCT_TECH_COMPANIES):
+                    evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (product tech company)", priority=4))
 
         if j_size in ("1-10", "11-50", "51-200"):
             is_startup = True

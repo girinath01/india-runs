@@ -14,8 +14,8 @@ def _get_nlp():
     global _nlp
     if _nlp is None:
         try:
-            # Disable parser for speed since we only need NER
-            _nlp = spacy.load("en_core_web_sm", disable=["parser"])
+            # Disable parser, tagger, and lemmatizer for speed since we only need NER
+            _nlp = spacy.load("en_core_web_sm", disable=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"])
             print("[NER Engine] Loaded spaCy en_core_web_sm successfully.")
         except Exception as e:
             print(f"[NER Engine] WARNING: Failed to load spaCy model: {e}")
