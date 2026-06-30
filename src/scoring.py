@@ -394,21 +394,21 @@ def generate_reasoning(
     # Hard Rejection override (now Major Penalty)
     if penalty_multiplier <= 0.6:
         if gaps and ("no production" in gaps[0] or fv.production.score == 0):
-            parts = ["Major Penalty: No evidence of shipping to production."]
+            parts.append("Major Penalty: No evidence of shipping to production.")
         elif fv.production.research_only:
-            parts = ["Major Penalty: Pure research background."]
+            parts.append("Major Penalty: Pure research background.")
         elif fv.company.consult_fraction > 0.90:
-            parts = ["Major Penalty: Almost entirely consulting background."]
+            parts.append("Major Penalty: Almost entirely consulting background.")
         elif any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
-            parts = [f"Major Penalty: Non-technical role ({title})."]
+            parts.append(f"Major Penalty: Non-technical role ({title}).")
         elif fv.production.ship_count == 0:
-            parts = ["Major Penalty: No evidence of shipping ML systems to production."]
+            parts.append("Major Penalty: No evidence of shipping ML systems to production.")
         elif not fv.jd_intent.search_hit and not fv.jd_intent.recommendation_hit and fv.production.score < 5:
-            parts = ["Major Penalty: Lacks required production retrieval/ranking domain experience."]
+            parts.append("Major Penalty: Lacks required production retrieval/ranking domain experience.")
         elif re.search(r'\b(computer vision|cv|vision|perception|image processing|robotics|speech)\b', title) or fv.skills.disq_fraction > 0.25:
-            parts = ["Major Penalty: CV/Speech specialist without core retrieval experience."]
+            parts.append("Major Penalty: CV/Speech specialist without core retrieval experience.")
         else:
-            parts = ["Major Penalty: Disqualified due to massive penalties."]
+            parts.append("Major Penalty: Disqualified due to massive penalties.")
 
     # ── Quick-join indicator ──────────────────────────────────────────
     if notice_days <= 30 and fv.hiring.open_to_work and final_score >= 40:
