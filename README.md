@@ -85,7 +85,13 @@ After the technical score is capped at 95.0, the final 5.0 points are reserved f
 ### Pre-computation & Assets
 
 Before running, the system requires the local ONNX embedding model and spaCy NER model to be available offline. These are downloaded during the build step.
-If you are deploying to Hugging Face or another fresh environment, you must run the asset downloader first:
+If you are deploying to Hugging Face or another fresh environment, you must run the asset downloader first.
+
+The `download_offline_assets.py` script specifically downloads:
+1. **spaCy `en_core_web_sm`**: A lightweight English NLP model used for extremely fast Named Entity Recognition (NER) to pull organization names.
+2. **`all-MiniLM-L6-v2`**: A Sentence-Transformers embedding model. The script downloads it and automatically exports its weights into ONNX format (`local_onnx_model/`) so it can be run purely on CPU via `onnxruntime`.
+
+If a download fails due to network issues, the script includes a built-in retry mechanism to attempt downloading up to 3 times automatically.
 
 ```bash
 # 1. Install dependencies
