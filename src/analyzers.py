@@ -6,6 +6,7 @@ from .constants import _SPEC_ML_KW, _SPEC_RETRIEVAL_KW, _SPEC_BACKEND_KW, _SPEC_
 from .schemas import *
 from .utils import calculate_actual_yoe, _split_sentences, _get_career_text, parse_date
 from .semantic_engine import compute_semantic_scores, detect_negation, detect_weak_context, is_model_available
+from .ner_engine import extract_companies, has_senior_title
 
 def analyze_career(c: Candidate) -> CareerFeatures:
     """
@@ -52,9 +53,11 @@ def analyze_career(c: Candidate) -> CareerFeatures:
             if curr_co and curr_co == prev_co:
                 curr_t  = (c.career[i].get("title",     "") or "").lower()
                 prev_t  = (c.career[i + 1].get("title", "") or "").lower()
-                curr_lvl = max((_levels[k] for k in _levels if k in curr_t), default=3)
-                prev_lvl = max((_levels[k] for k in _levels if k in prev_t), default=3)
-                if curr_lvl > prev_lvl:
+                
+                curr_is_senior = has_senior_title(curr_t)
+                prev_is_senior = has_senior_title(prev_t)
+                
+                if curr_is_senior and not prev_is_senior:
                     promotion_count += 1
     promo_pts = min(3, promotion_count)
 
@@ -180,6 +183,15 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
 
         if any(pc in comp for pc in PRODUCT_TECH_COMPANIES):
             evidence.append(Evidence("company", f"Worked at {comp.title()} (product tech company)", priority=5))
+            
+        # Use NER to extract implicit companies mentioned in descriptions (e.g. B2B clients, partners)
+        orgs = extract_companies(desc)
+        for org in orgs:
+            if any(ec in org for ec in ELITE_SEARCH_COMPANIES) and not elite_hit:
+                elite_hit = True
+                evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (elite search company)", priority=6))
+            if any(pc in org for pc in PRODUCT_TECH_COMPANIES):
+                evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (product tech company)", priority=4))
 
         if j_size in ("1-10", "11-50", "51-200"):
             is_startup = True

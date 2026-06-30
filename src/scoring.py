@@ -320,45 +320,35 @@ def generate_reasoning(
 
     if unique_evidence:
         # Opening sentence with candidate context
-        company_str = f" at {company}" if company else ""
+        company_str = f" at {company.title()}" if company else ""
         loc_str     = f" based in {c.location}" if c.location else ""
 
         if final_score >= 60:
-            openers = [
-                f"Strong match: {title}{company_str} with {yoe:g} years of experience{loc_str}.",
-                f"{title}{company_str} ({yoe:g} years{loc_str}) — strong alignment with JD.",
-                f"Top candidate: {yoe:g}-year {title}{company_str}{loc_str}.",
-            ]
+            opener = f"A highly experienced {title.title()}{company_str} with {yoe:g} years of tenure{loc_str}. This profile demonstrates strong alignment with the JD"
         elif final_score >= 35:
-            openers = [
-                f"Moderate match: {title}{company_str} with {yoe:g} years{loc_str}.",
-                f"{title} ({yoe:g} years){company_str} — partial alignment.",
-                f"Candidate with {yoe:g} years as {title}{company_str}{loc_str}.",
-            ]
+            opener = f"An experienced {title.title()}{company_str} ({yoe:g} years){loc_str}. The profile shows partial alignment with the JD"
         else:
-            openers = [
-                f"Weak match: {title} with {yoe:g} years experience.",
-                f"Limited alignment: {yoe:g}-year {title}{company_str}.",
-                f"Below threshold: {title}{company_str} ({yoe:g} years).",
-            ]
-        parts.append(openers[seed % len(openers)])
-
+            opener = f"A {title.title()}{company_str} with {yoe:g} years of experience. The profile has limited alignment with the JD"
+        
         # Evidence sentences — each maps to a JD requirement
+        evidence_phrases = []
         for ev in unique_evidence:
             jd_link = _EVIDENCE_JD_MAP.get(ev.category, "relevant to the role")
-            # Clean up the sentence — truncate at word boundary
-            sentence = ev.sentence.strip()
+            sentence = ev.sentence.strip().rstrip('.')
             if len(sentence) > 180:
                 sentence = sentence[:180].rsplit(" ", 1)[0]
-            if sentence and not sentence.endswith("."):
-                sentence += "."
-            if len(sentence) > 10:
-                parts.append(f"{sentence[0].upper()}{sentence[1:]} — {jd_link}.")
-            else:
-                parts.append(f"Evidence of {ev.category} experience — {jd_link}.")
+            evidence_phrases.append(f"{sentence.lower()} (which {jd_link})")
+            
+        if len(evidence_phrases) == 1:
+            parts.append(f"{opener} through {evidence_phrases[0]}.")
+        elif len(evidence_phrases) == 2:
+            parts.append(f"{opener}, notably through {evidence_phrases[0]}, and {evidence_phrases[1]}.")
+        else:
+            parts.append(f"{opener}, highlighted by {evidence_phrases[0]}, {evidence_phrases[1]}, and {evidence_phrases[2]}.")
     else:
         # No evidence extracted — use minimal factual statement
-        parts.append(f"{title} with {yoe:g} years experience. No strong retrieval/search evidence found in profile.")
+        company_str = f" at {company.title()}" if company else ""
+        parts.append(f"A {title.title()}{company_str} with {yoe:g} years of experience. The profile lacks strong retrieval, search, or ranking evidence.")
 
     # ── Biggest gap ───────────────────────────────────────────────────
     gaps = []
@@ -398,8 +388,8 @@ def generate_reasoning(
         gaps.append(f"{notice_days}-day notice period")
 
     if gaps and (final_score < 85 or "impossible" in gaps[0] or "inconsistencies" in gaps[0]):
-        gap_prefix = ["Gap: ", "However, ", "Concern: ", "Note: "][seed % 4]
-        parts.append(gap_prefix + gaps[0] + ".")
+        gap_str = gaps[0] if len(gaps) == 1 else f"{gaps[0]} and {gaps[1]}"
+        parts.append(f"However, we note that {gap_str}.")
         
     # Hard Rejection override (now Major Penalty)
     if penalty_multiplier <= 0.6:
