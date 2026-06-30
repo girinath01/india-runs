@@ -319,16 +319,34 @@ def generate_reasoning(
     unique_evidence = unique_evidence[:3]
 
     if unique_evidence:
-        # Opening sentence with candidate context
+        import random
+        rng = random.Random(seed)
+        
         company_str = f" at {company.title()}" if company else ""
         loc_str     = f" based in {c.location}" if c.location else ""
 
         if final_score >= 60:
-            opener = f"A highly experienced {title.title()}{company_str} with {yoe:g} years of tenure{loc_str}. This profile demonstrates strong alignment with the JD"
+            openers = [
+                f"With {yoe:g} years of experience, this {title.title()}{company_str} shows strong alignment.",
+                f"A standout {title.title()}{company_str} bringing {yoe:g} years of relevant experience.",
+                f"This {yoe:g}-year veteran {title.title()}{company_str} presents a highly compelling profile.",
+                f"An exceptional {title.title()}{company_str} whose {yoe:g} years of background strongly fit the JD."
+            ]
         elif final_score >= 35:
-            opener = f"An experienced {title.title()}{company_str} ({yoe:g} years){loc_str}. The profile shows partial alignment with the JD"
+            openers = [
+                f"A capable {title.title()}{company_str} with {yoe:g} years of experience.",
+                f"This profile features a {title.title()}{company_str} possessing {yoe:g} years of background.",
+                f"An experienced {title.title()}{company_str} ({yoe:g} years) with partial JD alignment.",
+                f"Bringing {yoe:g} years to the table, this {title.title()}{company_str} meets some key requirements."
+            ]
         else:
-            opener = f"A {title.title()}{company_str} with {yoe:g} years of experience. The profile has limited alignment with the JD"
+            openers = [
+                f"A {title.title()}{company_str} with {yoe:g} years of experience.",
+                f"This candidate is a {title.title()}{company_str} ({yoe:g} years) but lacks core alignment.",
+                f"While possessing {yoe:g} years of background, this {title.title()}{company_str} has limited JD fit."
+            ]
+        
+        opener = rng.choice(openers)
         
         # Evidence sentences — each maps to a JD requirement
         evidence_phrases = []
@@ -340,11 +358,12 @@ def generate_reasoning(
             evidence_phrases.append(f"{sentence.lower()} (which {jd_link})")
             
         if len(evidence_phrases) == 1:
-            parts.append(f"{opener} through {evidence_phrases[0]}.")
+            connectors = ["This is evidenced by", "We noted", "A key strength is"]
+            parts.append(f"{opener} {rng.choice(connectors)} {evidence_phrases[0]}.")
         elif len(evidence_phrases) == 2:
-            parts.append(f"{opener}, notably through {evidence_phrases[0]}, and {evidence_phrases[1]}.")
+            parts.append(f"{opener} Highlights include {evidence_phrases[0]}, as well as {evidence_phrases[1]}.")
         else:
-            parts.append(f"{opener}, highlighted by {evidence_phrases[0]}, {evidence_phrases[1]}, and {evidence_phrases[2]}.")
+            parts.append(f"{opener} Key indicators include {evidence_phrases[0]}, {evidence_phrases[1]}, and {evidence_phrases[2]}.")
     else:
         # No evidence extracted — use minimal factual statement
         company_str = f" at {company.title()}" if company else ""

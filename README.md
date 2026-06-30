@@ -10,35 +10,40 @@ pinned: false
 
 # Redrob AI Candidate Ranker
 
-A hyper-optimized, pure-Python candidate ranking engine built for the Redrob AI Senior AI Engineer (Founding Team) challenge. 
+A hyper-optimized, hybrid AI candidate ranking engine built for the Redrob AI Senior AI Engineer (Founding Team) challenge. 
 
 This system parses massive JSONL candidate pools and identifies the top 100 candidates by extracting deep semantic evidence of production-scale retrieval, search, and recommendation systems.
 
 ## System Architecture
 
-The engine is constrained to a strict 5-minute CPU-only execution budget without external LLM APIs. To achieve this, it utilizes a Two-Pass Filtering Pipeline.
+The engine is constrained to a strict 5-minute CPU-only execution budget without external LLM APIs. To achieve this, it utilizes a heavily optimized Three-Pass Filtering Pipeline, culminating in a local, multithreaded ONNX Semantic Engine.
 
 ```mermaid
 graph TD
     A[Input Candidates: 100k+ .jsonl] --> B(Pass 1: Fast Heuristic Streaming)
     B -->|Fast Score Calculation| C{Filter}
-    C -->|Top 12,000| D(Pass 2: Deep Feature Extraction)
+    C -->|Top 12,000| D(Pass 2: Deep Regex & NER)
     C -->|Bottom 88%| E[Discarded from Memory]
     
     D --> F[Domain Tenure Analyzer]
-    D --> G[JD Intent Analyzer]
+    D --> G[NER Company/Title Extractor]
     D --> H[Production & Scale Analyzer]
     D --> I[Hard Rejection Penalties]
     
-    F & G & H & I --> J(Final Scoring & Synergy Bonuses)
-    J --> K[Top 100 Selection]
-    K --> L[Output: submission.csv]
+    F & G & H & I --> J{Filter}
+    J -->|Top 400| K(Pass 3: ONNX Semantic Scoring)
+    K --> L[Cosine Similarity against Target Phrases]
+    L --> M[Final Scoring & Synergy Bonuses]
+    M --> N[Top 100 Selection]
+    N --> O[Output: submission.csv]
 ```
 
 1. **Pass 1: Fast Heuristic Streaming** 
    Streams the massive input in chunks, applying a lightweight regex-based heuristic to score candidates in milliseconds. It immediately discards the vast majority of candidates, keeping only the top 12,000 in memory.
-2. **Pass 2: Deep Feature Extraction** 
-   The top 12,000 candidates undergo rigorous, full-profile extraction. The system compiles a highly detailed FeatureVector for each candidate, analyzing their entire career trajectory, skill overlap, and explicit project descriptions.
+2. **Pass 2: Deep Feature Extraction & NER** 
+   The top 12,000 candidates undergo rigorous, full-profile extraction. Uses a lightweight spaCy Named Entity Recognition (NER) pipeline (with pipeline components stripped for speed) alongside advanced regex logic to compile a highly detailed FeatureVector.
+3. **Pass 3: Semantic Understanding (ONNX CPU Execution)**
+   The top 400 candidates are processed by a localized `all-MiniLM-L6-v2` embedding model. The model runs using `onnxruntime` with Graph Optimization and Intra-op Multithreading enabled to achieve blazing-fast CPU inference. It computes cosine similarities against ideal JD phrases to catch synonyms, paraphrasing, and negation.
 
 ## Scoring Modules (The Feature Vector)
 
@@ -75,16 +80,25 @@ After the technical score is capped at 95.0, the final 5.0 points are reserved f
 
 ## How to Reproduce
 
-`rank.py` uses only the Python standard library. It performs no network calls and requires no GPU.
+`rank.py` is designed to be completely offline, making it highly suitable for Hugging Face Spaces and restricted execution environments.
+
+### Pre-computation & Assets
+
+Before running, the system requires the local ONNX embedding model and spaCy NER model to be available offline. These are downloaded during the build step.
+If you are deploying to Hugging Face or another fresh environment, you must run the asset downloader first:
 
 ```bash
-# Verify no external dependencies are needed
+# 1. Install dependencies
 pip install -r requirements.txt
 
-# Run the full pipeline
+# 2. Download offline models (spaCy en_core_web_sm and sentence-transformers converted to ONNX)
+# This step pre-computes the model weights and saves them locally so rank.py does not need internet access.
+python download_offline_assets.py
+
+# 3. Run the full pipeline
 python rank.py --candidates ./candidates.jsonl --out ./bug_hunters.csv
 
-# Validate the final output structure
+# 4. Validate the final output structure
 python validate_submission.py ./bug_hunters.csv
 ```
 
