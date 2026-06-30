@@ -6,7 +6,7 @@ team_name: "Bug Hunters"
 primary_contact:
   name: "Girinath K"
   email: "kgns859@gmail.com"
-  phone: "TODO: add phone before portal submission"
+  phone: "8778601692"
 
 team_members:
   - name: "Girinath K"
@@ -16,7 +16,7 @@ team_members:
 github_repo: "https://github.com/girinath01/india-runs.git"
 github_branch: "master"
 
-sandbox_link: "TODO: add HuggingFace/Streamlit/Replit/Colab/Docker/Binder link before portal submission"
+sandbox_link: "https://huggingface.co/spaces/GIRI876/ranking-system"
 
 reproduce_command: "python rank.py --candidates ./candidates.jsonl --out ./bug_hunters.csv"
 validation_command: "python validate_submission.py ./bug_hunters.csv"
@@ -34,7 +34,7 @@ compute:
 
 ai_tools_used:
   - "Claude (Antigravity)"
-  - "OpenAI Codex"
+  - "OpenAI"
 
 ai_usage_summary: |
   AI tools were used for code review, documentation cleanup, and ranking

@@ -13,7 +13,7 @@ from .analyzers import extract_features
 from .scoring import compute_penalties, compute_score, generate_reasoning
 import concurrent.futures
 
-PASS2_POOL_SIZE = 12000
+PASS2_POOL_SIZE = 8000
 
 def normalize(raw: dict) -> Candidate:
     profile = raw.get("profile", {}) or {}
@@ -148,21 +148,21 @@ def rank_candidates(input_path: str, output_path: str) -> None:
 
     print(f"[Pass 2] Done in {time.time()-t0:.1f}s")
     
-    # Take the Top 400 candidates from Pass 2 for Semantic Re-Scoring
+    # Take the Top 300 candidates from Pass 2 for Semantic Re-Scoring
     pass2_results.sort(key=lambda x: (-x[1], x[0]))
-    top_400_pool = pass2_results[:400]
-    print(f"[Pass 2] Top {len(top_400_pool)} candidates passed to Pass 3 (dropped {len(pass2_results) - len(top_400_pool)})")
+    top_300_pool = pass2_results[:300]
+    print(f"[Pass 2] Top {len(top_300_pool)} candidates passed to Pass 3 (dropped {len(pass2_results) - len(top_300_pool)})")
 
     # ── PASS 3 ────────────────────────────────────────────────────────
-    # Run heavy semantic embedding model on the top 400 candidates
-    print(f"\n[Pass 3] Semantic re-scoring top {len(top_400_pool)} candidates...")
+    # Run heavy semantic embedding model on the top 300 candidates
+    print(f"\n[Pass 3] Semantic re-scoring top {len(top_300_pool)} candidates...")
     deep_results: list[tuple[str, float, str, set[str]]] = []
     
-    for i, (cid, pass2_score, c) in enumerate(top_400_pool):
+    for i, (cid, pass2_score, c) in enumerate(top_300_pool):
         score, reasoning, category = deep_score(c, skip_semantic=False)
         deep_results.append((cid, score, reasoning, category))
         if (i + 1) % 100 == 0:
-            print(f"  {i+1}/{len(top_400_pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
+            print(f"  {i+1}/{len(top_300_pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
 
     print(f"[Pass 3] Done in {time.time()-t0:.1f}s")
 
