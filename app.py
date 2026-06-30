@@ -2,6 +2,11 @@ import gradio as gr
 from src.pipeline import rank_candidates
 import os
 import pandas as pd
+import subprocess
+
+# Ensure offline assets (like the ONNX model) are downloaded when the Hugging Face space boots up!
+print("Checking for offline assets...")
+subprocess.run(["python", "download_offline_assets.py"], check=True)
 
 def process_file(file_obj):
     if file_obj is None:
