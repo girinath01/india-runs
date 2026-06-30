@@ -48,10 +48,10 @@ def deep_score(raw: dict) -> tuple[float, str, set[str]]:
 
     c  = normalize(raw)
     fv = extract_features(c)
-    penalties = compute_penalties(c, fv)
-    final = compute_score(fv, penalties)
+    penalties_multiplier = compute_penalties(c, fv)
+    final = compute_score(fv, penalties_multiplier)
 
-    reasoning, category = generate_reasoning(fv, c, final, penalties)
+    reasoning, category = generate_reasoning(fv, c, final, penalties_multiplier)
 
     return final, reasoning, category
 

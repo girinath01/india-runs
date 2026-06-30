@@ -4,104 +4,105 @@ from .constants import NON_TECH_TITLES, RESEARCH_HEAVY_RE
 from .schemas import Candidate, FeatureVector
 from .utils import _categorise_skill
 
-def compute_penalties(c: Candidate, fv: FeatureVector) -> int:
+def compute_penalties(c: Candidate, fv: FeatureVector) -> float:
     """
-    Dedicated penalty stage — subtracted from final score.
+    Dedicated penalty stage — reduces the final score via a multiplier.
 
     Penalties are NOT mixed into positive analyzers.
     Each penalty represents an explicit JD disqualifier.
     """
-    penalty = 0
+    multiplier = 1.0
     title = c.current_title.lower()
 
-    # P1: Non-tech title (20 pts) — marketing/HR/finance with AI keywords
+    # P1: Non-tech title — marketing/HR/finance with AI keywords
     if any(title == t or title.startswith(t + " ") or title.startswith(t + ",") for t in NON_TECH_TITLES):
-        penalty += 60
+        multiplier *= 0.40
 
-    # P2: Junior title (8 pts) — JD needs 5-9 yr seniority
+    # P2: Junior title — JD needs 5-9 yr seniority
     if any(p in title for p in ("junior", "jr.", "intern", "trainee")) and "senior" not in title:
-        penalty += 8
+        multiplier *= 0.92
 
-    # P3: Services-only career (6 pts) — JD explicitly warns about consulting
+    # P3: Services-only career — JD explicitly warns about consulting
     if fv.company.consult_fraction > 0.90:
-        penalty += 60
+        multiplier *= 0.40
     elif fv.career.service_years > 0 and fv.career.product_years + fv.career.startup_years == 0:
-        penalty += 6
+        multiplier *= 0.94
 
     # P_DOMAIN: Wrong domain (CV/Speech/Robotics)
     if fv.skills.disq_fraction > 0.40:
-        penalty += 60
+        multiplier *= 0.40
     elif fv.skills.disq_fraction > 0.25 and fv.jd_intent.score < 10:
-        penalty += 60
+        multiplier *= 0.40
     elif fv.skills.disq_fraction > 0.25:
-        penalty += 50
+        multiplier *= 0.50
         
     # Broadened CV Title check
     cv_match = re.search(r'\b(computer vision|cv|vision|perception|image processing|robotics|speech)\b', title)
     if cv_match:
         if fv.jd_intent.score < 10:
-            penalty += 60
+            multiplier *= 0.40
 
-    # P4: Research-only (8 pts) — JD: "tried it twice, didn't work"
+    # P4: Research-only — JD: "tried it twice, didn't work"
     if fv.production.research_only:
-        penalty += 60
+        multiplier *= 0.40
 
     # P_PROD: No shipped production experience (ignoring generic title boost)
     if fv.production.ship_count == 0:
-        penalty += 60
+        multiplier *= 0.40
         
     # P_NO_DOMAIN_PROD: Lacking production retrieval/ranking systems
     if not fv.jd_intent.search_hit and not fv.jd_intent.recommendation_hit:
         if fv.production.score < 5:
-            penalty += 60
+            multiplier *= 0.40
 
-    # P5: Prompt-engineer-only (10 pts) — JD: "If your experience consists of LangChain + OpenAI"
+    # P5: Prompt-engineer-only — JD: "If your experience consists of LangChain + OpenAI"
     skill_names = " ".join(s.get("name", "").lower() for s in c.skills)
     has_tier1 = fv.skills.tier1_count > 0
     llm_hype  = any(re.search(rf"\b{kw}\b", skill_names)
                      for kw in ("langchain", "prompt engineering", "openai", "chatgpt"))
     if not has_tier1 and llm_hype:
-        penalty += 10
+        multiplier *= 0.90
 
-    # P6: Fabricated experience (10 pts) — claimed >> actual
+    # P6: Fabricated experience — claimed >> actual
     if c.years_of_experience > 3 and fv.career.actual_yoe > 0:
         if c.years_of_experience > fv.career.actual_yoe * 2.8:
-            penalty += 10
+            multiplier *= 0.90
 
-    # P7: Job hopper (6 pts) — avg tenure < 18 months in recent jobs
+    # P7: Job hopper — avg tenure < 18 months in recent jobs
     if len(c.career) >= 3:
         recent_jobs = c.career[:3]
         total_months = sum(max(1, int(j.get("duration_months", 1) or 1)) for j in recent_jobs)
         avg_tenure   = total_months / len(recent_jobs)
         curr_dur     = int(c.career[0].get("duration_months", 1) or 1) if c.career else 0
         if avg_tenure < 18 and curr_dur < 36:
-            penalty += 6
+            multiplier *= 0.94
 
-    # P8: Research-heavy career (5 pts)
+    # P8: Research-heavy career
     if c.career:
         research_heavy = sum(
             1 for job in c.career
             if len(set(RESEARCH_HEAVY_RE.findall((job.get("description", "") or "").lower()))) >= 2
         )
         if research_heavy >= len(c.career) * 0.60:
-            penalty += 5
+            multiplier *= 0.95
 
-    # P9: No GitHub (4 pts) — 5+ YoE, closed-source, not research
+    # P9: No GitHub — 5+ YoE, closed-source, not research
     github = int(c.signals.get("github_activity_score", 0) or 0)
     if fv.career.actual_yoe > 5 and github <= 0 and not fv.production.research_only:
-        penalty += 4
+        multiplier *= 0.96
 
     # P10: Trajectory penalty (from trajectory analyzer)
-    penalty += fv.trajectory.penalty
+    if fv.trajectory.penalty > 0:
+        multiplier *= max(0.10, 1.0 - (fv.trajectory.penalty / 100.0))
 
-    return penalty
+    return multiplier
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 5 — TWO-STAGE SCORING ENGINE  (Step 1 + Step 3)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def compute_score(fv: FeatureVector, penalties: int) -> float:
+def compute_score(fv: FeatureVector, penalty_multiplier: float) -> float:
     """
     Two-Stage Scored Pipeline:
 
@@ -200,7 +201,7 @@ def compute_score(fv: FeatureVector, penalties: int) -> float:
     tech_contrib   = min(95.0, technical * 0.60)
     hiring_contrib = (hiring / 8.0) * 5.0    # -1.875 to +5.0
 
-    final = tech_contrib + hiring_contrib - penalties
+    final = (tech_contrib + hiring_contrib) * penalty_multiplier
 
     return max(0.0, min(100.0, final))
 
@@ -228,7 +229,7 @@ def generate_reasoning(
     fv: FeatureVector,
     c: Candidate,
     final_score: float,
-    penalties: int,
+    penalty_multiplier: float,
 ) -> tuple[str, set[str]]:
     """
     Evidence-driven reasoning v6.0.
@@ -338,7 +339,7 @@ def generate_reasoning(
         parts.append(gap_prefix + gaps[0] + ".")
         
     # Hard Rejection override (now Major Penalty)
-    if penalties >= 60:
+    if penalty_multiplier <= 0.6:
         if gaps and ("no production" in gaps[0] or fv.production.score == 0):
             parts = ["Major Penalty: No evidence of shipping to production."]
         elif fv.production.research_only:
