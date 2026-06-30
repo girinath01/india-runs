@@ -42,13 +42,14 @@ ai_usage_summary: |
   runs entirely offline using deterministic standard-library heuristics.
 
 methodology_summary: |
-  Two-pass offline heuristic ranker. Pass 1 streams all candidates and keeps the
-  top 5,000 by fast title, skill, search/vector, production, and elite-company
+  Three-pass offline heuristic ranker. Pass 1 streams all candidates and keeps the
+  top 8,000 by fast title, skill, search/vector, production, and elite-company
   signals. Pass 2 deeply scores retrieval/ranking/evaluation fit, explicit vector
   DB experience, production shipping evidence, behavioral availability, notice
-  period, open-to-work, location, and JD red flags. Honeypot checks catch
-  impossible tenure, inflated experience, expert zero-duration skills, domain
-  conflicts, and impossible durations for recent technologies. Output is a
+  period, open-to-work, location, and JD red flags. Pass 3 utilizes an ONNX-optimized
+  Semantic Engine (MiniLM-L6) running locally on CPU to score the top 300 candidates
+  against key JD phrases. Honeypot checks catch impossible tenure, inflated experience,
+  expert zero-duration skills, domain conflicts, and impossible durations. Output is a
   deterministic UTF-8 top-100 CSV.
 
 declarations:
