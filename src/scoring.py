@@ -104,14 +104,14 @@ def compute_penalties(c: Candidate, fv: FeatureVector) -> float:
 
 def compute_score(fv: FeatureVector, penalty_multiplier: float) -> float:
     """
-    Two-Stage Scored Pipeline:
+    Two-Stage Scored Pipeline with Semantic Understanding:
 
-    1. Technical Fit = sum of all technical component scores + synergy bonuses
+    1. Technical Fit = sum of all technical component scores + semantic score + synergy bonuses
     2. Hiring Readiness = capped behavioral score
     3. final = technical × 0.90 + hiring × 0.10 − penalties
 
-    Notice period can NEVER dominate technical merit.
-    Synergy bonuses reward JD-valued combinations.
+    The semantic score adds meaning-based understanding that catches synonyms,
+    penalizes negation, and rewards contextual depth beyond keyword matching.
     """
 
     # -- Technical components --
@@ -127,6 +127,43 @@ def compute_score(fv: FeatureVector, penalty_multiplier: float) -> float:
         + fv.trajectory.score     # 0-6
         + fv.skills.score         # 0-1  (drastically reduced; experience matters more; skills confirm, don't substitute)
     )
+
+    # ── NEW: Semantic Understanding Score ─────────────────────────────
+    # The semantic engine provides a combined score (0-15) based on
+    # cosine similarity between candidate text and JD target phrases.
+    # This catches synonyms regex misses and penalizes negated mentions.
+    semantic_score = fv.semantic.combined_score if fv.semantic.model_available else 0.0
+
+    # Cross-validation: when regex and semantic AGREE, boost confidence.
+    # When they DISAGREE, apply corrections.
+    if fv.semantic.model_available:
+        # Case 1: Regex found domain keywords but semantic says it's weak context
+        #         → reduce the score (candidate just mentioned words, no real depth)
+        if fv.jd_intent.search_hit and fv.semantic.search_sim < 0.25:
+            semantic_score -= 2.0  # regex false positive correction
+        if fv.jd_intent.recommendation_hit and fv.semantic.recommendation_sim < 0.25:
+            semantic_score -= 2.0
+
+        # Case 2: Regex missed keywords but semantic found strong alignment
+        #         → the candidate used different words to describe the same work
+        if not fv.jd_intent.search_hit and fv.semantic.search_sim > 0.55:
+            semantic_score += 3.0  # reward synonym/paraphrase understanding
+        if not fv.jd_intent.recommendation_hit and fv.semantic.recommendation_sim > 0.55:
+            semantic_score += 3.0
+
+        # Case 3: Negation penalty — candidate mentioned domain terms but negated them
+        if fv.semantic.negation_count >= 2:
+            semantic_score -= 3.0  # multiple negations = misleading profile
+        elif fv.semantic.negation_count >= 1:
+            semantic_score -= 1.5
+
+        # Case 4: Disqualifying domain alignment — semantic confirms wrong domain
+        if fv.semantic.disqualifying_sim > 0.50:
+            semantic_score -= 4.0  # strong CV/speech/robotics focus
+
+        semantic_score = max(0.0, min(15.0, semantic_score))
+
+    technical += semantic_score
 
     # ── Step 3: Synergy bonuses ───────────────────────────────────────
     synergy = 0
@@ -184,6 +221,16 @@ def compute_score(fv: FeatureVector, penalty_multiplier: float) -> float:
     if fv.production.score >= 10 and fv.evaluation.has_eval:
         synergy += 4  # Total +8 synergy for this pair now!
 
+    # === NEW: Semantic Synergy Bonuses ===
+    # When BOTH regex and semantic strongly agree, it's very high confidence
+    if fv.semantic.model_available:
+        if fv.jd_intent.search_hit and fv.semantic.search_sim > 0.55:
+            synergy += 3  # regex + semantic double-confirm search expertise
+        if fv.jd_intent.recommendation_hit and fv.semantic.recommendation_sim > 0.55:
+            synergy += 3  # regex + semantic double-confirm recommendation expertise
+        if fv.production.score >= 10 and fv.semantic.production_sim > 0.50:
+            synergy += 2  # strong production confirmed semantically
+
     technical += synergy
 
     # ── Hiring Readiness ──────────────────────────────────────────────
@@ -194,11 +241,10 @@ def compute_score(fv: FeatureVector, penalty_multiplier: float) -> float:
     # the strongest candidates. Hiring: -3..+8 maps to -1.875..+5.0.
     # Maximum possible: 95 + 5 - 0 = 100 (perfect technical + perfect hiring).
     # -- Technical cap: 95.
-    # We added domain_tenure (+10) and JD recency (+4) to the technical scale.
-    # Raw technical scores can now reach ~150. Multiplier adjusted to 0.75 so only 
-    # the top 1% (score > 126) hit the technical ceiling of 95.0. 
-    # This ensures hiring readiness remains visible at the top end.
-    tech_contrib   = min(95.0, technical * 0.60)
+    # We added domain_tenure (+10), JD recency (+4), and semantic (+15) to
+    # the technical scale. Raw technical scores can now reach ~170.
+    # Multiplier adjusted to 0.55 so only the top 1% hit the ceiling.
+    tech_contrib   = min(95.0, technical * 0.55)
     hiring_contrib = (hiring / 8.0) * 5.0    # -1.875 to +5.0
 
     final = (tech_contrib + hiring_contrib) * penalty_multiplier

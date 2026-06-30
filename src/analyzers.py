@@ -5,6 +5,7 @@ from .constants import *
 from .constants import _SPEC_ML_KW, _SPEC_RETRIEVAL_KW, _SPEC_BACKEND_KW, _SPEC_DATA_KW
 from .schemas import *
 from .utils import calculate_actual_yoe, _split_sentences, _get_career_text, parse_date
+from .semantic_engine import compute_semantic_scores, detect_negation, detect_weak_context, is_model_available
 
 def analyze_career(c: Candidate) -> CareerFeatures:
     """
@@ -919,12 +920,106 @@ def analyze_domain_tenure(c: Candidate) -> DomainTenure:
     return DomainTenure(score=score, domain_months=domain_months, domain_years=domain_years)
 
 
+def analyze_semantic(c: Candidate) -> SemanticFeatures:
+    """
+    SemanticAnalyzer v1.0 — embedding-based understanding.
+
+    Uses sentence-transformers to compute cosine similarity between candidate
+    career text and JD target phrases. This catches synonyms, detects negation,
+    and scores contextual depth that pure regex cannot.
+
+    Returns:
+        SemanticFeatures with per-domain similarity scores and a combined score (0–15).
+    """
+    if not is_model_available():
+        return SemanticFeatures(model_available=False)
+
+    full_text = _get_career_text(c, max_jobs=5)
+    if len(full_text.strip()) < 30:
+        return SemanticFeatures(model_available=True)
+
+    # Compute semantic similarity for ALL domains at once
+    scores = compute_semantic_scores(full_text)
+    if not scores:
+        return SemanticFeatures(model_available=True)
+
+    # Count negation and weak context in career text
+    sentences = _split_sentences(full_text.lower())
+    neg_count = sum(1 for s in sentences if detect_negation(s))
+    weak_count = sum(1 for s in sentences if detect_weak_context(s))
+
+    # Extract the per-domain similarities
+    search_sim = scores.get("search", 0.0)
+    rec_sim = scores.get("recommendation", 0.0)
+    prod_sim = scores.get("production", 0.0)
+    own_sim = scores.get("ownership", 0.0)
+    impact_sim = scores.get("impact", 0.0)
+    mkt_sim = scores.get("marketplace", 0.0)
+    eval_sim = scores.get("evaluation", 0.0)
+    disq_sim = scores.get("disqualifying", 0.0)
+
+    # Compute combined score: weighted by JD importance (0–15 range)
+    # Weights reflect what the JD values most:
+    #   search/recommendation: highest (core role)
+    #   production/ownership: high (shipper > researcher)
+    #   marketplace/evaluation: moderate (bonus alignment)
+    #   disqualifying: negative (wrong domain)
+    combined = (
+        search_sim * 4.0          # 0–4.0
+        + rec_sim * 3.5           # 0–3.5
+        + prod_sim * 2.5          # 0–2.5
+        + own_sim * 1.5           # 0–1.5
+        + impact_sim * 1.0        # 0–1.0
+        + mkt_sim * 1.5           # 0–1.5
+        + eval_sim * 1.0          # 0–1.0
+        - disq_sim * 3.0          # penalty for CV/speech/robotics alignment
+    )
+    combined = max(0.0, min(15.0, combined))
+
+    # Build evidence from semantic findings
+    evidence = []
+    if search_sim > 0.45:
+        evidence.append(Evidence("retrieval",
+            f"Semantic analysis confirms strong search/retrieval alignment (similarity: {search_sim:.2f})",
+            priority=9))
+    if rec_sim > 0.45:
+        evidence.append(Evidence("recommendation",
+            f"Semantic analysis confirms recommendation system experience (similarity: {rec_sim:.2f})",
+            priority=9))
+    if prod_sim > 0.45:
+        evidence.append(Evidence("production",
+            f"Semantic analysis confirms production deployment experience (similarity: {prod_sim:.2f})",
+            priority=8))
+    if disq_sim > 0.50:
+        evidence.append(Evidence("skill",
+            f"Semantic analysis flags strong CV/speech/robotics alignment (similarity: {disq_sim:.2f})",
+            priority=3))
+
+    return SemanticFeatures(
+        search_sim=search_sim,
+        recommendation_sim=rec_sim,
+        production_sim=prod_sim,
+        ownership_sim=own_sim,
+        impact_sim=impact_sim,
+        marketplace_sim=mkt_sim,
+        evaluation_sim=eval_sim,
+        disqualifying_sim=disq_sim,
+        combined_score=combined,
+        negation_count=neg_count,
+        weak_context_count=weak_count,
+        model_available=True,
+        evidence=evidence,
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 3 — FEATURE VECTOR MERGER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def extract_features(c: Candidate) -> FeatureVector:
-    """Run all analyzers → merge into FeatureVector."""
+def extract_features(c: Candidate, skip_semantic: bool = False) -> FeatureVector:
+    """Run all analyzers → merge into FeatureVector.
+    If skip_semantic is True, returns an empty SemanticFeatures object to save time.
+    """
     career     = analyze_career(c)
     company    = analyze_company(c)
     skills     = analyze_skills(c)
@@ -937,12 +1032,18 @@ def extract_features(c: Candidate) -> FeatureVector:
     trajectory    = analyze_trajectory(c)
     hiring        = analyze_hiring_readiness(c)
     domain_tenure = analyze_domain_tenure(c)
+    
+    if skip_semantic:
+        semantic = SemanticFeatures(model_available=False)
+    else:
+        semantic = analyze_semantic(c)
 
     # Merge all evidence for reasoning (sorted by priority, highest first)
     all_evidence = (
         career.evidence + company.evidence + skills.evidence +
         ev.evidence + ownership.evidence + impact.evidence +
-        production.evidence + jd_intent.evidence + evaluation.evidence
+        production.evidence + jd_intent.evidence + evaluation.evidence +
+        semantic.evidence
     )
     all_evidence.sort(key=lambda e: e.priority, reverse=True)
 
@@ -952,5 +1053,6 @@ def extract_features(c: Candidate) -> FeatureVector:
         production=production, jd_intent=jd_intent,
         evaluation=evaluation, trajectory=trajectory,
         hiring=hiring, domain_tenure=domain_tenure,
+        semantic=semantic,
         all_evidence=all_evidence,
     )

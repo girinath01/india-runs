@@ -30,7 +30,7 @@ def normalize(raw: dict) -> Candidate:
         signals=raw.get("redrob_signals", {}) or {},
     )
 
-def deep_score(raw: dict) -> tuple[float, str, set[str]]:
+def deep_score(raw: dict, skip_semantic: bool = False) -> tuple[float, str, set[str]]:
     """
     Full v6.0 pipeline:
       is_honeypot(raw)           → early exit
@@ -47,7 +47,7 @@ def deep_score(raw: dict) -> tuple[float, str, set[str]]:
         ), {"HONEYPOT"}
 
     c  = normalize(raw)
-    fv = extract_features(c)
+    fv = extract_features(c, skip_semantic=skip_semantic)
     penalties_multiplier = compute_penalties(c, fv)
     final = compute_score(fv, penalties_multiplier)
 
@@ -130,16 +130,36 @@ def rank_candidates(input_path: str, output_path: str) -> None:
     print(f"[Pass 1] Top {len(pool)} candidates passed to Pass 2 (dropped {total - len(pool)})")
 
     # ── PASS 2 ────────────────────────────────────────────────────────
-    print(f"\n[Pass 2] Deep scoring top {len(pool)} candidates...")
-    deep_results: list[tuple[str, float, str, set[str]]] = []
+    # Run fast regex scoring on the 12,000 top candidates (skipping heavy semantic embeddings)
+    print(f"\n[Pass 2] Deep regex scoring top {len(pool)} candidates...")
+    pass2_results: list[tuple[str, float, dict]] = []
 
     for i, (_, cid, c) in enumerate(pool):
-        score, reasoning, category = deep_score(c)
-        deep_results.append((cid, score, reasoning, category))
-        if (i + 1) % 500 == 0:
+        # We only need the score for now to filter down to top 1000
+        score, _, _ = deep_score(c, skip_semantic=True)
+        pass2_results.append((cid, score, c))
+        if (i + 1) % 2000 == 0:
             print(f"  {i+1}/{len(pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
 
     print(f"[Pass 2] Done in {time.time()-t0:.1f}s")
+    
+    # Take the Top 400 candidates from Pass 2 for Semantic Re-Scoring
+    pass2_results.sort(key=lambda x: (-x[1], x[0]))
+    top_400_pool = pass2_results[:400]
+    print(f"[Pass 2] Top {len(top_400_pool)} candidates passed to Pass 3 (dropped {len(pass2_results) - len(top_400_pool)})")
+
+    # ── PASS 3 ────────────────────────────────────────────────────────
+    # Run heavy semantic embedding model on the top 400 candidates
+    print(f"\n[Pass 3] Semantic re-scoring top {len(top_400_pool)} candidates...")
+    deep_results: list[tuple[str, float, str, set[str]]] = []
+    
+    for i, (cid, pass2_score, c) in enumerate(top_400_pool):
+        score, reasoning, category = deep_score(c, skip_semantic=False)
+        deep_results.append((cid, score, reasoning, category))
+        if (i + 1) % 100 == 0:
+            print(f"  {i+1}/{len(top_400_pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
+
+    print(f"[Pass 3] Done in {time.time()-t0:.1f}s")
 
     deep_results.sort(key=lambda x: (-x[1], x[0]))
     top_100 = deep_results[:100]

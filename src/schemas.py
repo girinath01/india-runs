@@ -183,6 +183,24 @@ class HiringReadiness:
 
 
 @dataclass
+class SemanticFeatures:
+    """Output of SemanticAnalyzer. Cosine similarity scores per JD domain (0.0–1.0)."""
+    search_sim: float = 0.0           # similarity to search/retrieval target
+    recommendation_sim: float = 0.0   # similarity to recommendation target
+    production_sim: float = 0.0       # similarity to production deployment target
+    ownership_sim: float = 0.0        # similarity to ownership/leadership target
+    impact_sim: float = 0.0           # similarity to measurable impact target
+    marketplace_sim: float = 0.0      # similarity to marketplace/matching target
+    evaluation_sim: float = 0.0       # similarity to evaluation methodology target
+    disqualifying_sim: float = 0.0    # similarity to disqualifying domains (CV/speech/robotics)
+    combined_score: float = 0.0       # weighted combination → 0–15 score range
+    negation_count: int = 0           # sentences with negated domain mentions
+    weak_context_count: int = 0       # sentences with only weak/surface context
+    model_available: bool = False     # whether the semantic model was loaded
+    evidence: list = field(default_factory=list)
+
+
+@dataclass
 class FeatureVector:
     """Typed aggregate. Scorer depends ONLY on this, not raw JSON."""
     career:     CareerFeatures
@@ -197,4 +215,5 @@ class FeatureVector:
     trajectory:    TrajectoryFeatures
     hiring:        HiringReadiness
     domain_tenure: DomainTenure
+    semantic:      SemanticFeatures = field(default_factory=SemanticFeatures)
     all_evidence: list = field(default_factory=list)  # merged evidence for reasoning

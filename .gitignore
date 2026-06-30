@@ -29,3 +29,6 @@ candidates.jsonl.gz
 .vscode/
 *.swp
 Thumbs.db
+
+local_model/
+model_cache/
