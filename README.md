@@ -22,8 +22,8 @@ The engine is constrained to a strict 5-minute CPU-only execution budget without
 graph TD
     A[Input Candidates: 100k+ .jsonl] --> B(Pass 1: Fast Heuristic Streaming)
     B -->|Fast Score Calculation| C{Filter}
-    C -->|Top 8,000| D(Pass 2: Deep Regex & NER)
-    C -->|Bottom 92%| E[Discarded from Memory]
+    C -->|Top 12,000| D(Pass 2: Deep Regex & NER)
+    C -->|Bottom 88%| E[Discarded from Memory]
     
     D --> F[Domain Tenure Analyzer]
     D --> G[NER Company/Title Extractor]
@@ -31,7 +31,7 @@ graph TD
     D --> I[Hard Rejection Penalties]
     
     F & G & H & I --> J{Filter}
-    J -->|Top 250| K(Pass 3: ONNX Semantic Scoring)
+    J -->|Top 400| K(Pass 3: ONNX Semantic Scoring)
     K --> L[Cosine Similarity against Target Phrases]
     L --> M[Final Scoring & Synergy Bonuses]
     M --> N[Top 100 Selection]
@@ -39,11 +39,11 @@ graph TD
 ```
 
 1. **Pass 1: Fast Heuristic Streaming** 
-   Streams the massive input in chunks, applying a lightweight regex-based heuristic to score candidates in milliseconds. It immediately discards the vast majority of candidates, keeping only the top 8,000 in memory.
+   Streams the massive input in chunks, applying a lightweight regex-based heuristic to score candidates in milliseconds. It immediately discards the vast majority of candidates, keeping only the top 12,000 in memory.
 2. **Pass 2: Deep Feature Extraction & NER** 
-   The top 8,000 candidates undergo rigorous, full-profile extraction. Uses a lightweight spaCy Named Entity Recognition (NER) pipeline (with pipeline components stripped for speed) alongside advanced regex logic to compile a highly detailed FeatureVector.
+   The top 12,000 candidates undergo rigorous, full-profile extraction. Uses a lightweight spaCy Named Entity Recognition (NER) pipeline (with pipeline components stripped for speed) alongside advanced regex logic to compile a highly detailed FeatureVector.
 3. **Pass 3: Semantic Understanding (ONNX CPU Execution)**
-   The top 250 candidates are processed by a localized `all-MiniLM-L6-v2` embedding model. The model runs using `onnxruntime` with Graph Optimization and Intra-op Multithreading enabled to achieve blazing-fast CPU inference. It computes cosine similarities against ideal JD phrases to catch synonyms, paraphrasing, and negation.
+   The top 400 candidates are processed by a localized `all-MiniLM-L6-v2` embedding model. The model runs using `onnxruntime` with Graph Optimization and Intra-op Multithreading enabled to achieve blazing-fast CPU inference. It computes cosine similarities against ideal JD phrases to catch synonyms, paraphrasing, and negation.
 
 ## Scoring Modules (The Feature Vector)
 
