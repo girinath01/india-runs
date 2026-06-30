@@ -2,7 +2,8 @@ import math
 import re
 from datetime import datetime
 from .constants import *
-from .constants import _SPEC_ML_KW, _SPEC_RETRIEVAL_KW, _SPEC_BACKEND_KW, _SPEC_DATA_KW
+from .constants import (_SPEC_ML_KW, _SPEC_RETRIEVAL_KW, _SPEC_BACKEND_KW, _SPEC_DATA_KW,
+                        _SPEC_ML_RE, _SPEC_RETRIEVAL_RE, _SPEC_BACKEND_RE, _SPEC_DATA_RE)
 from .schemas import *
 from .utils import calculate_actual_yoe, _split_sentences, _get_career_text, parse_date
 from .semantic_engine import compute_semantic_scores, detect_negation, detect_weak_context, is_model_available
@@ -66,7 +67,7 @@ def analyze_career(c: Candidate) -> CareerFeatures:
     for job in c.career:
         t = (job.get("title", "") or "").lower()
         d = (job.get("description", "") or "").lower()
-        if any(kw in t or kw in d for kw in _SPEC_ML_KW + _SPEC_RETRIEVAL_KW):
+        if _SPEC_ML_RE.search(t) or _SPEC_ML_RE.search(d) or _SPEC_RETRIEVAL_RE.search(t) or _SPEC_RETRIEVAL_RE.search(d):
             ml_months += int(job.get("duration_months", 0) or 0)
     ml_years = ml_months / 12.0
     ml_pts = min(4, int(ml_years * 0.8))
@@ -78,13 +79,13 @@ def analyze_career(c: Candidate) -> CareerFeatures:
         d = (job.get("description", "") or "").lower()[:500]
         td = t + " " + d
         dur = max(1, int(job.get("duration_months", 1) or 1))
-        if any(kw in td for kw in _SPEC_RETRIEVAL_KW):
+        if _SPEC_RETRIEVAL_RE.search(td):
             spec_counts["RETRIEVAL"] += dur
-        elif any(kw in td for kw in _SPEC_ML_KW):
+        elif _SPEC_ML_RE.search(td):
             spec_counts["ML"] += dur
-        elif any(kw in td for kw in _SPEC_BACKEND_KW):
+        elif _SPEC_BACKEND_RE.search(td):
             spec_counts["BACKEND"] += dur
-        elif any(kw in td for kw in _SPEC_DATA_KW):
+        elif _SPEC_DATA_RE.search(td):
             spec_counts["DATA"] += dur
 
     if any(spec_counts.values()):
@@ -177,22 +178,22 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
         if is_consulting:
             consulting_months += dur
 
-        if any(ec in comp for ec in ELITE_SEARCH_COMPANIES):
+        if ELITE_SEARCH_COMPANIES_RE.search(comp):
             elite_hit = True
             evidence.append(Evidence("company", f"Worked at {comp.title()} (elite search/recommendation company)", priority=7))
 
-        if any(pc in comp for pc in PRODUCT_TECH_COMPANIES):
+        if PRODUCT_TECH_COMPANIES_RE.search(comp):
             evidence.append(Evidence("company", f"Worked at {comp.title()} (product tech company)", priority=5))
             
         # Use NER to extract implicit companies mentioned in descriptions (e.g. B2B clients, partners)
         # Pre-filter: only run NER if a target company might be in the description
-        if any(ec in desc for ec in ELITE_SEARCH_COMPANIES) or any(pc in desc for pc in PRODUCT_TECH_COMPANIES):
+        if ELITE_SEARCH_COMPANIES_RE.search(desc) or PRODUCT_TECH_COMPANIES_RE.search(desc):
             orgs = extract_companies(desc)
             for org in orgs:
-                if any(ec in org for ec in ELITE_SEARCH_COMPANIES) and not elite_hit:
+                if ELITE_SEARCH_COMPANIES_RE.search(org) and not elite_hit:
                     elite_hit = True
                     evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (elite search company)", priority=6))
-                if any(pc in org for pc in PRODUCT_TECH_COMPANIES):
+                if PRODUCT_TECH_COMPANIES_RE.search(org):
                     evidence.append(Evidence("company", f"Collaborated with/built for {org.title()} (product tech company)", priority=4))
 
         if j_size in ("1-10", "11-50", "51-200"):
@@ -212,7 +213,7 @@ def analyze_company(c: Candidate) -> CompanyFeatures:
     if best_type != "MARKETPLACE":
         if search_exposure and ranking_exposure:
             best_type = "SEARCH"
-        elif any(any(pc in (j.get("company", "") or "").lower() for pc in PRODUCT_TECH_COMPANIES) for j in c.career):
+        elif any(PRODUCT_TECH_COMPANIES_RE.search((j.get("company", "") or "").lower()) for j in c.career):
             best_type = "PRODUCT"
         elif elite_hit:
             best_type = "SEARCH"
@@ -580,7 +581,7 @@ def analyze_jd_intent(c: Candidate) -> JDIntentFeatures:
     # Search-company bonus: detect via career history
     for job in c.career:
         comp = (job.get("company", "") or "").lower()
-        if any(sc in comp for sc in SEARCH_COMPANIES):
+        if SEARCH_COMPANIES_RE.search(comp):
             if not search_hit:
                 search_hit = True  # implicit search experience
 
@@ -917,7 +918,7 @@ def analyze_domain_tenure(c: Candidate) -> DomainTenure:
         dur = max(1, int(job.get("duration_months", 1) or 1))
         if (SEARCH_RE.search(td)
                 or RECOMMENDATION_RE.search(td)
-                or any(kw in td for kw in _SPEC_RETRIEVAL_KW)):
+                or _SPEC_RETRIEVAL_RE.search(td)):
             domain_months += dur
 
     domain_years = domain_months / 12.0

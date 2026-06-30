@@ -11,6 +11,7 @@ from .utils import candidate_id_num
 from .fast_filter import fast_score, is_honeypot
 from .analyzers import extract_features
 from .scoring import compute_penalties, compute_score, generate_reasoning
+import concurrent.futures
 
 PASS2_POOL_SIZE = 12000
 
@@ -134,12 +135,16 @@ def rank_candidates(input_path: str, output_path: str) -> None:
     print(f"\n[Pass 2] Deep regex scoring top {len(pool)} candidates...")
     pass2_results: list[tuple[str, float, dict]] = []
 
-    for i, (_, cid, c) in enumerate(pool):
-        # We only need the score for now to filter down to top 1000
+    def process_candidate(item):
+        i, (_, cid, c) = item
         score, _, _ = deep_score(c, skip_semantic=True)
-        pass2_results.append((cid, score, c))
-        if (i + 1) % 2000 == 0:
-            print(f"  {i+1}/{len(pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
+        return (i, cid, score, c)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        for i, cid, score, c in executor.map(process_candidate, enumerate(pool)):
+            pass2_results.append((cid, score, c))
+            if (i + 1) % 2000 == 0:
+                print(f"  {i+1}/{len(pool)} scored  ({time.time()-t0:.1f}s)", flush=True)
 
     print(f"[Pass 2] Done in {time.time()-t0:.1f}s")
     

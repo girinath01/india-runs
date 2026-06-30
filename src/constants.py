@@ -170,14 +170,17 @@ PRODUCT_TECH_COMPANIES = frozenset({
     "swiggy", "zomato", "razorpay", "meesho", "flipkart", "ola", "gojek",
     "grab", "zepto", "uber", "doordash", "instacart",
 })
+PRODUCT_TECH_COMPANIES_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, PRODUCT_TECH_COMPANIES)) + r')\b')
 
 ELITE_SEARCH_COMPANIES = frozenset({
     "google", "meta", "facebook", "linkedin", "netflix", "pinterest", "airbnb", "amazon",
 })
+ELITE_SEARCH_COMPANIES_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, ELITE_SEARCH_COMPANIES)) + r')\b')
 
 SEARCH_COMPANIES = frozenset({
     "linkedin", "google", "meta", "amazon", "airbnb", "pinterest", "spotify", "netflix",
 })
+SEARCH_COMPANIES_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, SEARCH_COMPANIES)) + r')\b')
 
 STRONG_TITLE_SCORES: dict[str, float] = {
     "search engineer": 1.0, "ranking engineer": 1.0,
@@ -263,13 +266,20 @@ SHIP_FAST_RE = re.compile(r'\b(shipped|deployed|production|at scale|million|serv
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SPEC_RETRIEVAL_KW = ("retrieval", "search", "ranking", "recommendation", "matching",
-                      "relevance", "reranking", "information retrieval", "vector")
+                      "relevance", "recommender", "faiss", "elasticsearch")
+_SPEC_RETRIEVAL_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(_SPEC_RETRIEVAL_KW, key=len, reverse=True))) + r')\b')
+
 _SPEC_ML_KW        = ("machine learning", "ml ", " ml", "deep learning", "data science",
-                      "ai ", " ai", "nlp", "natural language")
+                      "nlp", "computer vision", "artificial intelligence", " ai ", "ai engineer")
+_SPEC_ML_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(_SPEC_ML_KW, key=len, reverse=True))) + r')\b')
+
 _SPEC_BACKEND_KW   = ("backend", "software engineer", "platform", "infrastructure",
-                      "microservice", "api", "distributed system")
+                      "full stack", "java", "c++", "golang", "microservices")
+_SPEC_BACKEND_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(_SPEC_BACKEND_KW, key=len, reverse=True))) + r')\b')
+
 _SPEC_DATA_KW      = ("data engineer", "data pipeline", "etl", "analytics",
-                      "data warehouse", "big data", "spark")
+                      "sql", "hadoop", "spark", "kafka")
+_SPEC_DATA_RE = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(_SPEC_DATA_KW, key=len, reverse=True))) + r')\b')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
