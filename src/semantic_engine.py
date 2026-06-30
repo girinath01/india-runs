@@ -43,7 +43,13 @@ def _get_model_and_tokenizer():
                 return None, None
                 
             _tokenizer = AutoTokenizer.from_pretrained(_MODEL_DIR)
-            _model = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+            
+            sess_options = ort.SessionOptions()
+            sess_options.intra_op_num_threads = 4
+            sess_options.inter_op_num_threads = 4
+            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+            _model = ort.InferenceSession(model_path, sess_options=sess_options, providers=['CPUExecutionProvider'])
             print(f"[Semantic Engine] ONNX Model loaded from {_MODEL_DIR}")
         except ImportError as e:
             print(f"[Semantic Engine] WARNING: Failed to load ONNX: {e}")
