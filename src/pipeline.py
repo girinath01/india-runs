@@ -158,7 +158,7 @@ def rank_candidates(input_path: str, output_path: str) -> None:
     print(f"\n[Pass 3] Semantic re-scoring top {len(top_300_pool)} candidates...")
     deep_results: list[tuple[str, float, str, set[str]]] = []
     
-    for i, (cid, pass2_score, c) in enumerate(top_300_pool):
+    for i, (cid, _, c) in enumerate(top_300_pool):
         score, reasoning, category = deep_score(c, skip_semantic=False)
         deep_results.append((cid, score, reasoning, category))
         if (i + 1) % 100 == 0:

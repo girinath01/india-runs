@@ -248,30 +248,6 @@ def compute_semantic_scores(text: str) -> dict[str, float]:
     return results
 
 
-def compute_sentence_semantic_scores(sentences: list[str], domain: str) -> list[tuple[str, float]]:
-    """Score individual sentences against a specific domain."""
-    if _get_model_and_tokenizer()[0] is None or not sentences:
-        return [(s, 0.0) for s in sentences]
-
-    target_emb = _get_target_embedding(domain)
-    if target_emb is None:
-        return [(s, 0.0) for s in sentences]
-
-    embeddings = _encode(sentences)
-
-    scored = []
-    for sent, emb in zip(sentences, embeddings):
-        sim = _cosine_similarity(emb, target_emb)
-        if detect_negation(sent):
-            sim *= 0.1
-        elif detect_weak_context(sent):
-            sim *= 0.4
-        scored.append((sent, float(sim)))
-
-    scored.sort(key=lambda x: -x[1])
-    return scored
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────

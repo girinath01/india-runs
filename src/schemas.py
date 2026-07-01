@@ -1,6 +1,4 @@
 from dataclasses import dataclass, field
-from datetime import date
-
 @dataclass
 class Evidence:
     """A single piece of extracted evidence with provenance."""

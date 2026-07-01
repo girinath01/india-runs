@@ -2,8 +2,8 @@ import math
 import re
 from datetime import datetime
 from .constants import *
-from .constants import (_SPEC_ML_KW, _SPEC_RETRIEVAL_KW, _SPEC_BACKEND_KW, _SPEC_DATA_KW,
-                        _SPEC_ML_RE, _SPEC_RETRIEVAL_RE, _SPEC_BACKEND_RE, _SPEC_DATA_RE)
+from .constants import (
+    _SPEC_ML_RE, _SPEC_RETRIEVAL_RE, _SPEC_BACKEND_RE, _SPEC_DATA_RE)
 from .schemas import *
 from .utils import calculate_actual_yoe, _split_sentences, _get_career_text, parse_date
 from .semantic_engine import compute_semantic_scores, detect_negation, detect_weak_context, is_model_available
@@ -42,10 +42,7 @@ def analyze_career(c: Candidate) -> CareerFeatures:
     consistency_pts = min(4, int(consistency * 4))
 
     # ── Promotions (0–3) ───────────────────────────────────────────────
-    _levels = {
-        "intern": 1, "trainee": 1, "junior": 2, "jr": 2,
-        "senior": 4, "lead": 5, "staff": 5, "principal": 5,
-    }
+
     promotion_count = 0
     if len(c.career) >= 2:
         for i in range(len(c.career) - 1):
@@ -470,7 +467,6 @@ def analyze_production(c: Candidate) -> ProductionFeatures:
 
         job_text = ((job.get("title", "") or "") + " " + (job.get("description", "") or "")).lower()
         j_size   = (job.get("company_size", "") or "")
-        dur      = max(1, int(job.get("duration_months", 1) or 1))
 
         size_mult = 1.25 if j_size in ("1-10", "11-50", "51-200") else 1.10 if j_size in ("201-500", "501-1000") else 1.00
 

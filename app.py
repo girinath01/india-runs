@@ -1,6 +1,5 @@
 import gradio as gr
 from src.pipeline import rank_candidates
-import os
 import pandas as pd
 import subprocess
 

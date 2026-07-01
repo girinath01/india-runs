@@ -301,8 +301,6 @@ def generate_reasoning(
     yoe     = c.years_of_experience
     title   = c.current_title or "Engineer"
     company = c.current_company
-    notice  = fv.hiring.notice_bonus
-
     # Stable variation seed
     seed = int(hashlib.blake2s(c.id.encode("utf-8"), digest_size=4).hexdigest(), 16)
 
@@ -323,8 +321,6 @@ def generate_reasoning(
         rng = random.Random(seed)
         
         company_str = f" at {company.title()}" if company else ""
-        loc_str     = f" based in {c.location}" if c.location else ""
-
         if final_score >= 60:
             openers = [
                 f"With {yoe:g} years of experience, this {title.title()}{company_str} shows strong alignment.",

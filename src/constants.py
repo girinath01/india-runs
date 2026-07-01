@@ -204,16 +204,6 @@ NON_TECH_TITLES = frozenset({
     "scrum master", "product manager", "sales", "marketing",
 })
 
-PREFERRED_LOCATIONS = frozenset({
-    "pune", "noida", "delhi", "delhi ncr", "ncr", "new delhi",
-    "gurgaon", "gurugram", "faridabad", "greater noida",
-    "hyderabad", "mumbai", "bangalore", "bengaluru",
-})
-
-PROFICIENCY_WEIGHTS = {
-    "expert": 1.0, "advanced": 0.75, "intermediate": 0.45, "beginner": 0.15,
-}
-
 SHIP_SIGNALS = frozenset({
     "production", "shipped", "launched", "deployed", "live system",
     "real users", "at scale", "million", "billion",
