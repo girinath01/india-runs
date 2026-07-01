@@ -7,7 +7,9 @@ import subprocess
 print("Checking for offline assets...")
 subprocess.run(["python", "download_offline_assets.py"], check=True)
 
-def process_file(file_obj):
+import typing
+
+def process_file(file_obj: typing.Optional[str]) -> typing.Tuple[typing.Optional[pd.DataFrame], typing.Optional[str]]:
     if file_obj is None:
         return None, None
     
