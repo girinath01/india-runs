@@ -32,8 +32,9 @@ demo = gr.Interface(
         gr.File(label="Download Ranked CSV")
     ],
     title="Bug Hunters - Redrob Ranker v6.0",
-    description="Upload a sample of candidates to rank them. The system will process them through the Two-Pass Filter Engine and output a `submission.csv` file."
+    description="Upload a sample of candidates to rank them. The system will process them through the Two-Pass Filter Engine and output a `submission.csv` file.",
+    api_name=False
 )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, show_api=False)
